@@ -17,14 +17,6 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
-    # Configure max upload size from config
-    if app.config.get('MAX_CONTENT_LENGTH'):
-        # Flask's MAX_CONTENT_LENGTH is directly used by request processing
-        # No need to set app.config['MAX_CONTENT_LENGTH'] = app.config.get('MAX_CONTENT_LENGTH')
-        # as it's already set by from_object. This is just a conceptual note.
-        pass
-
-
     # Ensure instance folder exists (Flask usually creates it for sessions etc, but good to be sure)
     try:
         os.makedirs(app.instance_path, exist_ok=True)
