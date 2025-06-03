@@ -44,6 +44,12 @@ class Config:
     AZURE_AD_TENANT_ID = os.environ.get('AZURE_AD_TENANT_ID')
     AZURE_AD_SCOPES = os.environ.get('AZURE_AD_SCOPES', 'User.Read openid profile email').split()
 
+    # File Upload Configuration
+    # Default to 'instance/uploads' relative to basedir if not in .env
+    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER') or os.path.join(basedir, 'instance', 'uploads')
+    ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'xml', 'nessus', 'burp', 'json', 'log'} # Added some more common ones
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024 # 16 MB limit for uploads
+
     _azure_tenant_id = os.environ.get('AZURE_AD_TENANT_ID')
     if _azure_tenant_id:
         AZURE_AD_AUTHORITY = f"https://login.microsoftonline.com/{_azure_tenant_id}"

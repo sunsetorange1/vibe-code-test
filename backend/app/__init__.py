@@ -3,8 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from flask_session import Session # Import Session
-from flask_dance.contrib.azure import make_azure_blueprint # Import make_azure_blueprint
+from flask_dance.contrib.azure import make_azure_blueprint
 from config import Config
+import os # Added import os
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -15,6 +16,34 @@ sess = Session() # Create Session instance
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # Configure max upload size from config
+    if app.config.get('MAX_CONTENT_LENGTH'):
+        # Flask's MAX_CONTENT_LENGTH is directly used by request processing
+        # No need to set app.config['MAX_CONTENT_LENGTH'] = app.config.get('MAX_CONTENT_LENGTH')
+        # as it's already set by from_object. This is just a conceptual note.
+        pass
+
+
+    # Ensure instance folder exists (Flask usually creates it for sessions etc, but good to be sure)
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+    except OSError as e:
+        # Log this, but it might not be fatal if instance_path is not strictly needed by all parts
+        app.logger.warning(f"Could not create instance folder at {app.instance_path}: {e}")
+
+
+    # Create upload folder if it doesn't exist
+    upload_folder_path = app.config.get('UPLOAD_FOLDER')
+    if upload_folder_path: # Check if UPLOAD_FOLDER is configured
+        try:
+            os.makedirs(upload_folder_path, exist_ok=True)
+            app.logger.info(f"Upload folder ensured at: {upload_folder_path}")
+        except OSError as e:
+            app.logger.error(f"Could not create upload folder at {upload_folder_path}: {e}")
+    else:
+        app.logger.warning("UPLOAD_FOLDER is not configured.")
+
 
     db.init_app(app)
     migrate.init_app(app, db)

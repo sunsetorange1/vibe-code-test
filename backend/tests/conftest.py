@@ -4,6 +4,12 @@ from app.models import User
 from app.project_models import Project, Baseline, TaskDefinition, ProjectTask
 from config import Config
 from cachelib.simple import SimpleCache
+import tempfile # For temp_upload_folder
+import shutil   # For temp_upload_folder cleanup
+import os       # For path operations
+from io import BytesIO # For mock_file_storage
+from werkzeug.datastructures import FileStorage # For mock_file_storage
+
 
 class TestConfig(Config):
     TESTING = True
@@ -133,3 +139,32 @@ def mock_azure_ad_graph_api_response(mock_azure_ad_user_info):
         def raise_for_status(self):
             if self.status_code >= 400: raise Exception(f"HTTP Error {self.status_code}")
     return MockResponse(json_data=mock_azure_ad_user_info, status_code=200)
+
+
+@pytest.fixture(scope='function')
+def temp_upload_folder(app): # app fixture ensures app context for config override
+    original_upload_folder = app.config.get('UPLOAD_FOLDER')
+    # Create a unique temporary directory for each test function using this fixture
+    # This is safer than a session-scoped temp dir if tests modify its contents.
+    temp_dir_base = tempfile.mkdtemp(prefix="pytest_temp_uploads_")
+    # test_specific_upload_folder = os.path.join(temp_dir_base, "uploads") # Not needed, use temp_dir_base directly
+    # os.makedirs(test_specific_upload_folder, exist_ok=True)
+
+    app.config['UPLOAD_FOLDER'] = temp_dir_base # Override UPLOAD_FOLDER to this temp dir
+
+    yield temp_dir_base # Provide the path to tests
+
+    app.config['UPLOAD_FOLDER'] = original_upload_folder # Restore original config
+    shutil.rmtree(temp_dir_base) # Clean up the entire temporary directory
+
+@pytest.fixture
+def mock_file_storage(request):
+    # Default values, can be overridden by marker e.g. @pytest.mark.parametrize("mock_file_storage", [{"filename": "...", ...}], indirect=True)
+    params = getattr(request, "param", {})
+    filename = params.get("filename", "test_file.txt")
+    content = params.get("content", b"Hello, world!")
+    content_type = params.get("content_type", "text/plain")
+
+    stream = BytesIO(content)
+    fs = FileStorage(stream=stream, filename=filename, content_type=content_type)
+    return fs

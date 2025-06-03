@@ -95,7 +95,7 @@ Endpoints for managing pentest projects. Prefix: `/api/projects`
 
 ## Baselines (Templates)
 
-Endpoints for managing reusable baseline templates of tasks. Prefix: `/api` (mixed prefixes for baselines and task_definitions)
+Endpoints for managing reusable baseline templates of tasks. Prefix: `/api`
 
 ### 1. Create Baseline
 *   **Endpoint:** `POST /api/baselines`
@@ -263,19 +263,30 @@ Endpoints for managing evidence (e.g., scan outputs, notes, files) associated wi
 
 ### 1. Add Evidence to Task
 *   **Endpoint:** `POST /api/tasks/<task_id>/evidence`
-*   **Description:** Adds an evidence record to a specific task. User must be project owner or task assignee. *Actual file upload mechanism is TBD; this endpoint records metadata.*
-*   **Request Body (JSON):**
+*   **Description:** Adds an evidence record to a specific task, including uploading an associated file. User must be project owner or task assignee.
+*   **Request Body (multipart/form-data):**
+    *   `file` (file part): The evidence file to upload (e.g., image, XML, TXT, PDF).
+    *   `tool_type` (form field, optional): The type of tool that generated the evidence (e.g., "Nessus", "Manual").
+    *   `notes` (form field, optional): Any notes about the evidence.
+    *   *The `file_name` for the evidence record will be derived from the uploaded file's name (sanitized by the server).*
+*   **Validations:**
+    *   File type must be one of the allowed extensions (e.g., `txt, pdf, png, jpg, xml, json, log, nessus, burp` - see server config for full list).
+    *   File size must not exceed the server's configured limit (e.g., 16MB - see server config).
+*   **Success Response (201 Created):** Evidence object.
     ```json
     {
-        "file_name": "nessus_scan_results.xml",
-        "file_path": "/uploads/project1/task101/nessus_scan_results.xml", // Placeholder
-        "storage_identifier": "cloud-storage-key-xyz", // Placeholder
+        "id": 1002,
+        "project_task_id": 101,
+        "uploaded_by_id": 123,
+        "file_name": "sanitized_original_filename.xml", // Original filename, sanitized for storage as metadata
+        "file_path": "projects/1/tasks/101/tool_type_or_evidence_uuid.xml", // Internal storage path relative to UPLOAD_FOLDER
+        "storage_identifier": "projects/1/tasks/101/tool_type_or_evidence_uuid.xml", // Identifier for storage (same as file_path for local)
         "tool_type": "Nessus",
-        "notes": "Initial scan of web servers."
+        "notes": "Scan results from initial network sweep.",
+        "upload_date": "2024-01-28T12:00:00Z"
     }
     ```
-*   **Success Response (201 Created):** Evidence object.
-*   **Error Responses:** `400 Bad Request` (e.g., missing file_name), `401 Unauthorized`, `403 Forbidden`, `404 Not Found` (task).
+*   **Error Responses:** `400 Bad Request` (e.g., no file, file type not allowed, missing task_id), `401 Unauthorized`, `403 Forbidden`, `404 Not Found` (task), `413 Payload Too Large`, `500 Internal Server Error` (e.g., file save failure).
 
 ### 2. List Evidence for Task
 *   **Endpoint:** `GET /api/tasks/<task_id>/evidence`
@@ -287,26 +298,33 @@ Endpoints for managing evidence (e.g., scan outputs, notes, files) associated wi
             "id": 1001,
             "project_task_id": 101,
             "uploaded_by_id": 123,
-            "file_name": "nessus_scan_results.xml",
-            "file_path": "...",
-            "storage_identifier": "...",
+            "file_name": "nessus_scan_results.xml", // User-facing original filename (sanitized)
+            "file_path": "projects/1/tasks/101/evidence_uuid.xml", // Internal path, may not be directly useful to client
+            "storage_identifier": "projects/1/tasks/101/evidence_uuid.xml", // Internal identifier
             "tool_type": "Nessus",
             "notes": "...",
             "upload_date": "2024-01-26T11:00:00Z"
         }
     ]
     ```
-*   **Error Responses:** `401 Unauthorized`, `403 Forbidden`, `404 Not Found`.
+    *(Note: `file_path` and `storage_identifier` are primarily for server-side use. Clients should rely on the `file_name` for display and the download endpoint for access.)*
 
 ### 3. Get Evidence Details
 *   **Endpoint:** `GET /api/evidence/<evidence_id>`
-*   **Description:** Retrieves details of a specific evidence record. User must be project owner, parent task assignee, or the uploader of the evidence.
-*   **Success Response (200 OK):** Evidence object.
+*   **Description:** Retrieves details (metadata) of a specific evidence record. User must be project owner, parent task assignee, or the uploader of the evidence.
+*   **Success Response (200 OK):** Evidence object (similar to "List Evidence" item structure).
+    *(Note: `file_path` and `storage_identifier` are primarily for server-side use.)*
 *   **Error Responses:** `401 Unauthorized`, `403 Forbidden`, `404 Not Found`.
 
-### 4. Delete Evidence
+### 4. Download Evidence File
+*   **Endpoint:** `GET /api/evidence/<evidence_id>/download`
+*   **Description:** Downloads the actual file associated with the evidence record. User must be project owner, parent task assignee, or the uploader of the evidence.
+*   **Success Response (200 OK):** The file content, with `Content-Disposition: attachment; filename="original_filename.ext"` header.
+*   **Error Responses:** `401 Unauthorized`, `403 Forbidden`, `404 Not Found` (evidence or file), `500 Internal Server Error`.
+
+### 5. Delete Evidence
 *   **Endpoint:** `DELETE /api/evidence/<evidence_id>`
-*   **Description:** Deletes an evidence record (metadata only). User must be project owner or the uploader of the evidence. *Actual file deletion from storage is TBD.*
+*   **Description:** Deletes an evidence record and its associated file from storage. User must be project owner or the uploader of the evidence.
 *   **Success Response (200 OK):**
     ```json
     {"msg": "Evidence deleted successfully"}
