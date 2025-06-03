@@ -45,13 +45,26 @@ def create_app(config_class=Config):
     # This should ideally be done carefully. If models define db.event listeners or something
     # that requires app context or db to be initialized, it might be tricky.
     # For simple models, it's usually fine.
-    from . import models
+    from . import models # Contains User model
+    from . import project_models # Contains Project, Baseline, TaskDefinition, ProjectTask, Evidence
 
     from .auth_routes import auth_bp
     app.register_blueprint(auth_bp)
 
     from .api_routes import api_bp
     app.register_blueprint(api_bp)
+
+    from .project_api_routes import project_api_bp
+    app.register_blueprint(project_api_bp)
+
+    from .baseline_api_routes import baseline_api_bp
+    app.register_blueprint(baseline_api_bp)
+
+    from .task_api_routes import task_api_bp
+    app.register_blueprint(task_api_bp)
+
+    from .evidence_api_routes import evidence_api_bp # Import evidence_api_bp
+    app.register_blueprint(evidence_api_bp) # Register it
 
     # Simple health check route
     @app.route('/health')
