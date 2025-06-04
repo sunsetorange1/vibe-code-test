@@ -17,7 +17,7 @@ function App() {
   return (
     <Router>
       <NavigationBar />
-      <Container className="mt-4">
+      <Container fluid className="mt-4">
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<LoginPage />} />
