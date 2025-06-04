@@ -9,6 +9,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import CreateTaskPage from './pages/CreateTaskPage';
 import TaskDetailPage from './pages/TaskDetailPage';
 import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage'; // Import RegisterPage
 import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRoute
 import { Container } from 'react-bootstrap';
 import './App.css';
@@ -17,10 +18,11 @@ function App() {
   return (
     <Router>
       <NavigationBar />
-      <Container className="mt-4">
+      <Container fluid className="mt-4">
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} /> {/* New Route */}
           <Route path="/" element={<HomePage />} />
 
           {/* Protected Routes */}

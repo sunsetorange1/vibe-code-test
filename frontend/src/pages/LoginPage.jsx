@@ -64,9 +64,9 @@ function LoginPage() {
             </div>
           </Form>
           {/* Optional: Add Link to a registration page if available */}
-          {/* <div className="text-center mt-3">
+          <div className="text-center mt-3">
             Don't have an account? <Link to="/register">Sign Up</Link>
-          </div> */}
+          </div>
         </Card.Body>
       </Card>
     </Container>
