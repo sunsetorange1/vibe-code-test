@@ -11,6 +11,8 @@ class Project(db.Model):
     start_date = db.Column(db.Date, nullable=True)
     end_date = db.Column(db.Date, nullable=True)
     owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) # Assuming 'user' is the tablename for User model
+    priority = db.Column(db.String(64), nullable=True, default='Medium')
+    project_type = db.Column(db.String(128), nullable=True)
 
     owner = db.relationship('User', backref=db.backref('owned_projects', lazy='dynamic'))
     tasks = db.relationship('ProjectTask', backref='project', lazy='dynamic', cascade="all, delete-orphan")
@@ -54,6 +56,8 @@ class ProjectTask(db.Model):
     status = db.Column(db.String(64), nullable=False, default='pending') # 'pending', 'in_progress', 'review', 'completed', 'on_hold', 'cancelled'
     assigned_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     due_date = db.Column(db.Date, nullable=True)
+    priority = db.Column(db.String(64), nullable=True, default='Medium')
+    due_date_reminder_sent = db.Column(db.Boolean, nullable=True, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -77,6 +81,8 @@ class Evidence(db.Model):
     tool_type = db.Column(db.String(128), nullable=True) # e.g., 'Nessus', 'Burp', 'Nuclei', 'Manual', 'Screenshot'
     notes = db.Column(db.Text, nullable=True)
     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    mime_type = db.Column(db.String(128), nullable=True)
+    verified = db.Column(db.Boolean, nullable=True, default=False)
 
     uploader = db.relationship('User', backref=db.backref('uploaded_evidences', lazy='dynamic'))
     # task relationship is via backref from ProjectTask.evidences

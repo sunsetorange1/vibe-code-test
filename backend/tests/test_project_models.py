@@ -6,10 +6,10 @@ from datetime import date, datetime
 # Model tests now use the 'db_session' fixture from conftest.py
 # which provides the initialized 'actual_db' object and handles setup/teardown.
 
-def test_create_project_model(db_session, project_owner_user):
+def test_create_project_model(db_session, consultant_user): # Changed to consultant_user
     project = Project(
         name="Model Test Project Alpha",
-        owner_id=project_owner_user.id,
+        owner_id=consultant_user.id, # Project owned by consultant
         status="planning",
         start_date=date(2024,1,1),
         description="Detailed description for Alpha."
@@ -20,19 +20,25 @@ def test_create_project_model(db_session, project_owner_user):
     retrieved_project = db_session.session.get(Project, project.id)
     assert retrieved_project is not None
     assert retrieved_project.name == "Model Test Project Alpha"
-    assert retrieved_project.owner.username == project_owner_user.username
+    assert retrieved_project.owner.username == consultant_user.username # Check against consultant_user
     assert retrieved_project.status == "planning"
     assert retrieved_project.start_date == date(2024,1,1)
+    assert retrieved_project.priority == 'Medium' # Test default priority
 
-def test_project_task_relationship(db_session, sample_project, sample_task_definition, project_owner_user):
-    # sample_project and sample_task_definition are created using db_session via their fixtures
+    retrieved_project.project_type = "Internal Audit"
+    db_session.session.commit()
+    updated_project = db_session.session.get(Project, project.id)
+    assert updated_project.project_type == "Internal Audit"
+
+def test_project_task_relationship(db_session, sample_project, sample_task_definition, consultant_user): # Changed to consultant_user
+    # sample_project is owned by consultant_user, sample_task_definition is on consultant's baseline
     task = ProjectTask(
         project_id=sample_project.id,
         task_definition_id=sample_task_definition.id,
         title="Task for relationship test Beta",
         description="A task specifically for testing relationships.",
         status="pending",
-        assigned_to_id=project_owner_user.id,
+        assigned_to_id=consultant_user.id, # Task assigned to consultant_user
         due_date=date(2024,12,31)
     )
     db_session.session.add(task)
@@ -40,7 +46,7 @@ def test_project_task_relationship(db_session, sample_project, sample_task_defin
 
     assert task in sample_project.tasks.all()
     assert task.task_definition == sample_task_definition
-    assert task.assignee == project_owner_user
+    assert task.assignee == consultant_user # Assert against consultant_user
     # Check count accurately based on what's created in this test's scope
     assert sample_project.tasks.count() >= 1
 
@@ -64,11 +70,11 @@ def test_baseline_task_definition_relationship(db_session, sample_baseline):
     td2_found = any(td.title == "TD Gamma 2" for td in baseline_task_defs)
     assert td1_found and td2_found
 
-def test_task_evidence_relationship(db_session, sample_project_task, project_owner_user):
-    # sample_project_task's assignee is project_owner_user
+def test_task_evidence_relationship(db_session, sample_project_task, consultant_user): # Changed to consultant_user
+    # sample_project_task is assigned to consultant_user by default from fixture
     ev = Evidence(
         project_task_id=sample_project_task.id,
-        uploaded_by_id=project_owner_user.id,
+        uploaded_by_id=consultant_user.id, # Evidence uploaded by consultant_user
         file_name="evidence_rel_test_delta.txt",
         tool_type="Manual",
         notes="Some notes for delta evidence."
@@ -77,7 +83,7 @@ def test_task_evidence_relationship(db_session, sample_project_task, project_own
     db_session.session.commit()
 
     assert ev in sample_project_task.evidences.all()
-    assert ev.uploader == project_owner_user
+    assert ev.uploader == consultant_user # Assert against consultant_user
     assert sample_project_task.evidences.count() >= 1
 
 def test_project_task_defaults_and_timestamps(db_session, sample_project):
@@ -99,12 +105,15 @@ def test_project_task_defaults_and_timestamps(db_session, sample_project):
     # For now, just checking it's not None and is a datetime
     assert task.updated_at is not None
     assert task.updated_at >= first_updated_at
+    assert task.priority == 'Medium' # Test default priority
+    assert task.due_date_reminder_sent is False # Test default reminder_sent
 
 
-def test_evidence_defaults(db_session, sample_project_task, project_owner_user):
+def test_evidence_defaults(db_session, sample_project_task, consultant_user): # Changed to consultant_user
+    # sample_project_task is associated with consultant_user
     evidence = Evidence(
         project_task_id=sample_project_task.id,
-        uploaded_by_id=project_owner_user.id,
+        uploaded_by_id=consultant_user.id, # Evidence uploaded by consultant_user
         file_name="default_check.txt"
     )
     db_session.session.add(evidence)
@@ -112,3 +121,9 @@ def test_evidence_defaults(db_session, sample_project_task, project_owner_user):
     assert evidence.id is not None
     assert evidence.upload_date is not None
     assert isinstance(evidence.upload_date, datetime)
+    assert evidence.verified is False # Test default verified
+
+    evidence.mime_type = "application/pdf"
+    db_session.session.commit()
+    updated_evidence = db_session.session.get(Evidence, evidence.id)
+    assert updated_evidence.mime_type == "application/pdf"

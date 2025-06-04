@@ -87,6 +87,9 @@ def create_app(config_class=Config):
     from .evidence_api_routes import evidence_api_bp # Import evidence_api_bp
     app.register_blueprint(evidence_api_bp) # Register it
 
+    from app.user_api_routes import user_api_bp
+    app.register_blueprint(user_api_bp)
+
     # Simple health check route
     @app.route('/health')
     def health():

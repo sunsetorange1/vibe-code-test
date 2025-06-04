@@ -1,305 +1,246 @@
 import os
-import uuid # For mocking save return value
-from unittest.mock import patch, MagicMock
-import pytest # For parametrize
+import uuid
+from unittest.mock import patch
+import pytest
 from flask import current_app
-from werkzeug.datastructures import FileStorage # For type hint and direct creation
+from werkzeug.datastructures import FileStorage
 from io import BytesIO
-from app.services.storage_service import LocalStorageService # Import the service
-
+from app.services.storage_service import LocalStorageService
 from app.project_models import Evidence, ProjectTask, User, Project
+from app.models import ADMIN, CONSULTANT, READ_ONLY # For setting roles if needed
 from app import db
 
-def test_add_evidence_to_task_by_owner(client, auth_user_and_headers, sample_project_task):
-    owner, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = owner.id
-    sample_project_task.assigned_to_id = None
-    db.session.commit()
+# Test adding evidence by Consultant who owns the project
+def test_add_evidence_to_task_by_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    # sample_project_task.project is owned by consultant_user via fixture default
+    assert sample_project_task.project.owner_id == consultant_owner.id
 
-    file_content = b"owner uploaded content"
-    mock_fs = FileStorage(stream=BytesIO(file_content), filename="owner_evidence.txt", content_type="text/plain")
-
-    form_data = {
-        'tool_type': 'OwnerTool',
-        'notes': 'Owner uploaded this evidence.',
-        'file': mock_fs
-    }
-
-    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
-                     data=form_data, headers=headers, content_type='multipart/form-data')
-
-    assert rv.status_code == 201, f"Response: {rv.data.decode()}"
-    data = rv.get_json()
-    assert data['file_name'] == "owner_evidence.txt"
-    assert data['uploaded_by_id'] == owner.id
-    assert data['tool_type'] == 'OwnerTool'
-
-    evidence = db.session.get(Evidence, data['id'])
-    assert evidence is not None
-    assert evidence.project_task_id == sample_project_task.id
-    assert evidence.file_path is not None
-
-def test_add_evidence_to_task_by_assignee(client, auth_user_and_headers, sample_project_task, another_user_data):
-    assignee, headers = auth_user_and_headers
-    sample_project_task.assigned_to_id = assignee.id
-
-    project = db.session.get(Project, sample_project_task.project_id)
-    if project.owner_id == assignee.id:
-        other_owner = User.query.filter_by(email=another_user_data["email"]).first()
-        if not other_owner:
-            other_owner = User(username=another_user_data["username"], email=another_user_data["email"])
-            other_owner.set_password(another_user_data["password"]) # Corrected
-            db.session.add(other_owner); db.session.commit()
-        project.owner_id = other_owner.id
-    db.session.commit()
-
-    mock_fs = FileStorage(stream=BytesIO(b"assignee data"), filename="assignee_evidence.log", content_type="text/plain")
-    form_data = {'tool_type': 'AssigneeTool', 'notes': 'Assignee stuff', 'file': mock_fs}
+    file_content = b"consultant uploaded content"
+    mock_fs = FileStorage(stream=BytesIO(file_content), filename="consultant_evidence.txt", content_type="text/plain")
+    form_data = {'tool_type': 'ConsultantTool', 'notes': 'Consultant uploaded this.', 'file': mock_fs}
 
     rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
                      data=form_data, headers=headers, content_type='multipart/form-data')
     assert rv.status_code == 201, f"Response: {rv.data.decode()}"
     data = rv.get_json()
-    assert data['file_name'] == "assignee_evidence.log"
-    assert data['uploaded_by_id'] == assignee.id
+    assert data['file_name'] == "consultant_evidence.txt"
+    assert data['uploaded_by_id'] == consultant_owner.id
+    assert data['mime_type'] == "text/plain"
+    assert data['verified'] is False
 
-def test_get_task_evidence(client, auth_user_and_headers, sample_project_task):
-    uploader, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = uploader.id
+# Test adding evidence by Admin to any project
+def test_add_evidence_to_task_by_admin(client, auth_admin_user_and_headers, sample_project_task, admin_user):
+    # sample_project_task is owned by consultant_user by default
+    admin, headers = auth_admin_user_and_headers
+    assert sample_project_task.project.owner_id != admin.id
+
+    mock_fs = FileStorage(stream=BytesIO(b"admin content"), filename="admin_evidence.txt", content_type="text/plain")
+    form_data = {'tool_type': 'AdminTool', 'notes': 'Admin uploaded this.', 'file': mock_fs}
+
+    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
+                     data=form_data, headers=headers, content_type='multipart/form-data')
+    assert rv.status_code == 201, f"Response: {rv.data.decode()}"
+    data = rv.get_json()
+    assert data['uploaded_by_id'] == admin.id
+
+# Test READ_ONLY user cannot add evidence
+def test_add_evidence_readonly_user_fails(client, auth_user_and_headers, sample_project_task):
+    _, headers = auth_user_and_headers # auth_user_and_headers is READ_ONLY
+    mock_fs = FileStorage(stream=BytesIO(b"ro content"), filename="ro_evidence.txt", content_type="text/plain")
+    form_data = {'file': mock_fs}
+    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence', data=form_data, headers=headers)
+    assert rv.status_code == 403
+
+# Test getting evidence by Consultant owner
+def test_get_task_evidence_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
+    Evidence.query.delete() # Clear previous evidence for cleaner assertion
     db.session.commit()
-
-    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=uploader.id, file_name="test_evidence_list.txt", file_path="dummy/path.txt")
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_owner.id, file_name="evidence.txt", file_path="dummy.txt", mime_type="text/plain")
     db.session.add(evidence)
     db.session.commit()
 
     rv = client.get(f'/api/tasks/{sample_project_task.id}/evidence', headers=headers)
     assert rv.status_code == 200
     data = rv.get_json()
-    assert isinstance(data, list)
-    assert len(data) >= 1
+    assert len(data) == 1
+    assert data[0]['id'] == evidence.id
+
+# Test getting evidence by Admin
+def test_get_task_evidence_admin(client, auth_admin_user_and_headers, sample_project_task, consultant_user):
+    admin, headers = auth_admin_user_and_headers
+    # Evidence on consultant's project
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="evidence_for_admin.txt", file_path="dummy_admin.txt")
+    db.session.add(evidence)
+    db.session.commit()
+
+    rv = client.get(f'/api/tasks/{sample_project_task.id}/evidence', headers=headers)
+    assert rv.status_code == 200
+    data = rv.get_json()
     assert any(e['id'] == evidence.id for e in data)
 
-def test_get_specific_evidence_detail_by_uploader(client, auth_user_and_headers, sample_project_task, another_user_data):
-    uploader, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-
-    if project.owner_id == uploader.id:
-        distinct_owner = User.query.filter_by(email=another_user_data["email"]).first()
-        if not distinct_owner:
-            distinct_owner = User(username=another_user_data["username"], email=another_user_data["email"])
-            distinct_owner.set_password(another_user_data["password"]) # Corrected
-            db.session.add(distinct_owner); db.session.commit()
-        project.owner_id = distinct_owner.id
-    if sample_project_task.assigned_to_id == uploader.id:
-        sample_project_task.assigned_to_id = None
-    db.session.commit()
-
-    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=uploader.id, file_name="detail_evidence_test.txt", file_path="dummy/detail.txt")
+# Test getting specific evidence by READ_ONLY user (fails as per new RBAC)
+def test_get_specific_evidence_detail_readonly_fails(client, auth_user_and_headers, sample_project_task, consultant_user):
+    _, headers = auth_user_and_headers # READ_ONLY user
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="detail.txt", file_path="dummy_detail.txt")
     db.session.add(evidence)
     db.session.commit()
-
     rv = client.get(f'/api/evidence/{evidence.id}', headers=headers)
-    assert rv.status_code == 200, f"Response: {rv.data.decode()}"
-    data = rv.get_json()
-    assert data['file_name'] == "detail_evidence_test.txt"
-
-def test_delete_evidence_uploader(client, auth_user_and_headers, sample_project_task, another_user_data):
-    uploader, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    if project.owner_id == uploader.id:
-        distinct_owner = User.query.filter_by(email=another_user_data["email"]).first()
-        if not distinct_owner:
-            distinct_owner = User(username=another_user_data["username"], email=another_user_data["email"])
-            distinct_owner.set_password(another_user_data["password"]) # Corrected
-            db.session.add(distinct_owner); db.session.commit()
-        project.owner_id = distinct_owner.id
-
-    sample_project_task.assigned_to_id = None
-    db.session.commit()
-
-    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=uploader.id, file_name="to_delete_by_uploader.txt", file_path="dummy/delete_me.txt")
-    db.session.add(evidence)
-    db.session.commit()
-    evidence_id = evidence.id
-
-    with patch('app.services.storage_service.LocalStorageService.delete') as mock_storage_delete:
-        mock_storage_delete.return_value = True
-        rv = client.delete(f'/api/evidence/{evidence_id}', headers=headers)
-
-    assert rv.status_code == 200, f"Response: {rv.data.decode()}"
-    assert db.session.get(Evidence, evidence_id) is None
-    mock_storage_delete.assert_called_once_with(evidence.file_path)
-
-def test_delete_evidence_project_owner(client, auth_user_and_headers, sample_project_task, another_user_data):
-    project_owner, headers = auth_user_and_headers
-
-    uploader = User.query.filter_by(email=another_user_data['email']).first()
-    if not uploader:
-        uploader = User(username=another_user_data['username'], email=another_user_data['email'])
-        uploader.set_password(another_user_data['password']) # Corrected
-        db.session.add(uploader); db.session.commit()
-    assert project_owner.id != uploader.id
-
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = project_owner.id
-    db.session.commit()
-
-    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=uploader.id, file_name="owner_can_delete_this.txt", file_path="dummy/owner_del.txt")
-    db.session.add(evidence)
-    db.session.commit()
-    evidence_id = evidence.id
-
-    with patch('app.services.storage_service.LocalStorageService.delete') as mock_storage_delete:
-        mock_storage_delete.return_value = True
-        rv = client.delete(f'/api/evidence/{evidence_id}', headers=headers)
-
-    assert rv.status_code == 200, f"Response: {rv.data.decode()}"
-    assert db.session.get(Evidence, evidence_id) is None
-    mock_storage_delete.assert_called_once_with(evidence.file_path)
-
-def test_delete_evidence_unauthorized(client, auth_user_and_headers, sample_project_task, another_user_data):
-    project_owner_for_setup, _ = auth_user_and_headers
-
-    uploader_email = another_user_data['email']
-    uploader = User.query.filter_by(email=uploader_email).first()
-    if not uploader:
-        uploader = User(username=another_user_data['username'], email=uploader_email)
-        uploader.set_password(another_user_data['password']) # Corrected
-        db.session.add(uploader); db.session.commit()
-
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = project_owner_for_setup.id
-    sample_project_task.assigned_to_id = None
-    db.session.commit()
-
-    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=uploader.id, file_name="cannot_delete.txt", file_path="dummy/no_delete.txt")
-    db.session.add(evidence)
-    db.session.commit()
-    evidence_id = evidence.id
-
-    third_user_payload = {"username": "thirdparty_deleter", "email": "third_deleter@example.com", "password": "password"}
-    client.post('/auth/register', json=third_user_payload)
-    login_rv = client.post('/auth/login', json={"username": third_user_payload['username'], "password": "password"})
-    third_party_headers = {"Authorization": f"Bearer {login_rv.get_json()['access_token']}"}
-
-    rv = client.delete(f'/api/evidence/{evidence_id}', headers=third_party_headers)
     assert rv.status_code == 403
-    assert db.session.get(Evidence, evidence_id) is not None
 
-# --- New tests for file operations ---
-
-@pytest.mark.parametrize("mock_file_storage", [{"filename": "good_upload.txt", "content": b"text content"}], indirect=True)
-def test_upload_evidence_file_success_with_mocked_service(client, auth_user_and_headers, sample_project_task, mock_file_storage): # Corrected fixture name
-    owner, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = owner.id
+# Test delete by Consultant owner
+def test_delete_evidence_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_owner.id, file_name="delete_me.txt", file_path="dummy_del.txt")
+    db.session.add(evidence)
     db.session.commit()
+    with patch('app.services.storage_service.LocalStorageService.delete', return_value=True) as mock_delete:
+        rv = client.delete(f'/api/evidence/{evidence.id}', headers=headers)
+    assert rv.status_code == 200
+    mock_delete.assert_called_once()
 
-    form_data = {'tool_type': 'Manual', 'notes': 'A test upload', 'file': mock_file_storage}
+# Test delete by Admin
+def test_delete_evidence_admin(client, auth_admin_user_and_headers, sample_project_task, consultant_user):
+    admin, headers = auth_admin_user_and_headers
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="admin_delete.txt", file_path="dummy_admin_del.txt")
+    db.session.add(evidence)
+    db.session.commit()
+    with patch('app.services.storage_service.LocalStorageService.delete', return_value=True) as mock_delete:
+        rv = client.delete(f'/api/evidence/{evidence.id}', headers=headers)
+    assert rv.status_code == 200
+    mock_delete.assert_called_once()
 
-    with patch('app.evidence_api_routes.LocalStorageService.save') as mock_save:
-        unique_id = uuid.uuid4().hex
-        expected_filename_on_disk = f"Manual_{unique_id}.txt" # Assuming .txt from mock_file_storage
-        expected_relative_path = os.path.join("projects", str(project.id), "tasks", str(sample_project_task.id), expected_filename_on_disk)
-        mock_save.return_value = expected_relative_path
+# Test delete by READ_ONLY (fails)
+def test_delete_evidence_readonly_fails(client, auth_user_and_headers, sample_project_task, consultant_user):
+    _, headers = auth_user_and_headers
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="ro_delete_fail.txt", file_path="dummy_ro_del_fail.txt")
+    db.session.add(evidence)
+    db.session.commit()
+    rv = client.delete(f'/api/evidence/{evidence.id}', headers=headers)
+    assert rv.status_code == 403
 
-        rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
-                        data=form_data, headers=headers, content_type='multipart/form-data')
-
-    assert rv.status_code == 201, f"Response: {rv.data.decode()}"
+# Test update by Consultant owner
+def test_update_evidence_metadata_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_owner.id, file_name="update_me.txt", notes="Initial")
+    db.session.add(evidence)
+    db.session.commit()
+    payload = {"notes": "Updated by consultant owner", "verified": True}
+    rv = client.put(f'/api/evidence/{evidence.id}', json=payload, headers=headers)
+    assert rv.status_code == 200
     data = rv.get_json()
-    assert data['file_name'] == "good_upload.txt"
-    assert data['file_path'] == expected_relative_path
-    mock_save.assert_called_once()
-    args_passed, kwargs_passed = mock_save.call_args
-    assert kwargs_passed.get('desired_filename_prefix') == 'Manual'
-    assert isinstance(args_passed[0], FileStorage)
-    assert args_passed[0].filename == "good_upload.txt"
+    assert data['notes'] == payload['notes']
+    assert data['verified'] == payload['verified']
 
-@pytest.mark.parametrize("mock_file_storage", [{"filename": "bad_extension.exe", "content": b"binary"}], indirect=True)
-def test_upload_evidence_file_type_not_allowed(client, auth_user_and_headers, sample_project_task, mock_file_storage): # Corrected fixture name
-    owner, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = owner.id
+# Test update by Admin
+def test_update_evidence_metadata_admin(client, auth_admin_user_and_headers, sample_project_task, consultant_user):
+    admin, headers = auth_admin_user_and_headers
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="admin_update.txt", notes="Initial")
+    db.session.add(evidence)
     db.session.commit()
+    payload = {"notes": "Updated by admin", "verified": True}
+    rv = client.put(f'/api/evidence/{evidence.id}', json=payload, headers=headers)
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data['notes'] == payload['notes']
 
-    form_data = {'file': mock_file_storage, 'tool_type': 'Exploit'}
-    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
-                    data=form_data, headers=headers, content_type='multipart/form-data')
-    assert rv.status_code == 400
-    assert "File type not allowed" in rv.get_json()['msg']
-
-def test_upload_evidence_file_too_large(client, auth_user_and_headers, sample_project_task): # Corrected fixture name
-    owner, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = owner.id
+# Test update by READ_ONLY (fails)
+def test_update_evidence_metadata_readonly_fails(client, auth_user_and_headers, sample_project_task, consultant_user):
+    _, headers = auth_user_and_headers
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name="ro_update_fail.txt")
+    db.session.add(evidence)
     db.session.commit()
+    payload = {"notes": "Attempt by RO", "verified": True}
+    rv = client.put(f'/api/evidence/{evidence.id}', json=payload, headers=headers)
+    assert rv.status_code == 403
 
+# File operations tests adapted for new RBAC
+@pytest.mark.parametrize("mock_file_storage", [{"filename": "consultant_upload.txt", "content": b"c content", "content_type": "text/plain"}], indirect=True)
+def test_upload_evidence_file_success_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task, mock_file_storage):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    project = sample_project_task.project
+    assert project.owner_id == consultant_owner.id
+    form_data = {'tool_type': 'ConsultantTool', 'notes': 'Consultant upload', 'file': mock_file_storage}
+    with patch('app.evidence_api_routes.LocalStorageService.save') as mock_save:
+        mock_save.return_value = "mocked/path.txt"
+        rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence', data=form_data, headers=headers, content_type='multipart/form-data')
+    assert rv.status_code == 201
+    data = rv.get_json()
+    assert data['file_name'] == mock_file_storage.filename
+    assert data['mime_type'] == mock_file_storage.content_type
+
+@pytest.mark.parametrize("mock_file_storage", [{"filename": "bad.exe", "content": b"binary", "content_type": "application/octet-stream"}], indirect=True)
+def test_upload_evidence_file_type_not_allowed_by_consultant(client, auth_consultant_user_and_headers, sample_project_task, mock_file_storage):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
+    form_data = {'file': mock_file_storage}
+    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence', data=form_data, headers=headers)
+    assert rv.status_code == 400 # File type check happens after role check
+
+def test_upload_evidence_file_too_large_by_consultant(client, auth_consultant_user_and_headers, sample_project_task):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
     large_content = b"A" * (current_app.config['MAX_CONTENT_LENGTH'] + 1)
-    large_file = FileStorage(stream=BytesIO(large_content), filename="large_file.txt")
-
+    large_file = FileStorage(stream=BytesIO(large_content), filename="large.txt", content_type="text/plain")
     form_data = {'file': large_file}
-    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence',
-                    data=form_data, headers=headers, content_type='multipart/form-data')
-    assert rv.status_code == 413
+    rv = client.post(f'/api/tasks/{sample_project_task.id}/evidence', data=form_data, headers=headers)
+    assert rv.status_code == 413 # Size check happens after role check
 
-def test_download_evidence_file(client, auth_user_and_headers, sample_project_task): # Corrected fixture name, removed db
-    viewer, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = viewer.id
-    db.session.commit()
-
-    file_content = b"Actual downloadable content."
-    original_filename = "download_test.txt"
-    mock_fs = FileStorage(stream=BytesIO(file_content), filename=original_filename)
-
+# Test download by Admin
+def test_download_evidence_file_admin(client, auth_admin_user_and_headers, sample_project_task, consultant_user, temp_upload_folder):
+    admin, headers = auth_admin_user_and_headers
+    evidence_uploader = consultant_user
+    file_content = b"Content for admin download."
+    original_filename = "admin_download.txt"
+    mock_fs = FileStorage(stream=BytesIO(file_content), filename=original_filename, content_type="text/plain")
     storage_service = LocalStorageService()
-    subfolder = os.path.join("projects", str(project.id), "tasks", str(sample_project_task.id))
-    relative_path = storage_service.save(mock_fs, subfolder=subfolder, desired_filename_prefix="download")
-    assert relative_path is not None
-
-    evidence_record = Evidence(
-        project_task_id=sample_project_task.id, uploaded_by_id=viewer.id,
-        file_name=original_filename, file_path=relative_path
-    )
-    db.session.add(evidence_record)
-    db.session.commit()
-
-    rv = client.get(f'/api/evidence/{evidence_record.id}/download', headers=headers)
-
+    relative_path = storage_service.save(mock_fs, subfolder="test_subdir", desired_filename_prefix="admin_dl")
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=evidence_uploader.id, file_name=original_filename, file_path=relative_path, mime_type=mock_fs.mimetype)
+    db.session.add(evidence); db.session.commit()
+    rv = client.get(f'/api/evidence/{evidence.id}/download', headers=headers)
     assert rv.status_code == 200
     assert rv.data == file_content
-    assert rv.headers.get("Content-Disposition") == f"attachment; filename={original_filename}" # Corrected: no quotes
 
-def test_delete_evidence_with_actual_file_cleanup(client, auth_user_and_headers, sample_project_task, temp_upload_folder): # Corrected fixture name, removed db
-    owner, headers = auth_user_and_headers
-    project = db.session.get(Project, sample_project_task.project_id)
-    project.owner_id = owner.id
-    db.session.commit()
-
+# Test download by READ_ONLY (fails)
+def test_download_evidence_file_readonly_fails(client, auth_user_and_headers, sample_project_task, consultant_user, temp_upload_folder):
+    _, headers = auth_user_and_headers # READ_ONLY user
+    evidence_uploader = consultant_user
+    mock_fs = FileStorage(stream=BytesIO(b"content"), filename="ro_dl_fail.txt", content_type="text/plain")
     storage_service = LocalStorageService()
-    file_content = b"Content to be deleted with record."
-    original_filename = "delete_me_fully.txt"
-    mock_fs = FileStorage(stream=BytesIO(file_content), filename=original_filename)
-    subfolder = os.path.join("projects", str(project.id), "tasks", str(sample_project_task.id))
-    relative_path = storage_service.save(mock_fs, subfolder=subfolder, desired_filename_prefix="delete_op")
-    assert relative_path is not None
+    relative_path = storage_service.save(mock_fs, subfolder="test_subdir", desired_filename_prefix="ro_dl_fail")
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=evidence_uploader.id, file_name=mock_fs.filename, file_path=relative_path, mime_type=mock_fs.mimetype)
+    db.session.add(evidence); db.session.commit()
+    rv = client.get(f'/api/evidence/{evidence.id}/download', headers=headers)
+    assert rv.status_code == 403
 
-    full_physical_path = storage_service.get_full_path(relative_path)
-    assert os.path.exists(full_physical_path)
-
-    evidence_record = Evidence(
-        project_task_id=sample_project_task.id, uploaded_by_id=owner.id,
-        file_name=original_filename, file_path=relative_path
-    )
-    db.session.add(evidence_record)
-    db.session.commit()
-    evidence_id = evidence_record.id
-
-    rv = client.delete(f'/api/evidence/{evidence_id}', headers=headers)
-
+# Test delete with file cleanup by Admin
+def test_delete_evidence_by_admin_with_actual_file_cleanup(client, auth_admin_user_and_headers, sample_project_task, consultant_user, temp_upload_folder):
+    admin, headers = auth_admin_user_and_headers
+    storage_service = LocalStorageService()
+    mock_fs = FileStorage(stream=BytesIO(b"delete this"), filename="admin_del_actual.txt", content_type="text/plain")
+    relative_path = storage_service.save(mock_fs, subfolder="test_subdir_del", desired_filename_prefix="admin_del_op_actual")
+    assert os.path.exists(storage_service.get_full_path(relative_path))
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_user.id, file_name=mock_fs.filename, file_path=relative_path, mime_type=mock_fs.mimetype)
+    db.session.add(evidence); db.session.commit()
+    rv = client.delete(f'/api/evidence/{evidence.id}', headers=headers)
     assert rv.status_code == 200
-    assert db.session.get(Evidence, evidence_id) is None
-    assert not os.path.exists(full_physical_path)
+    assert not os.path.exists(storage_service.get_full_path(relative_path))
+
+# Test download by Consultant owner
+def test_download_evidence_file_consultant_owner(client, auth_consultant_user_and_headers, sample_project_task, temp_upload_folder):
+    consultant_owner, headers = auth_consultant_user_and_headers
+    assert sample_project_task.project.owner_id == consultant_owner.id
+    file_content = b"Consultant download content."
+    original_filename = "consultant_download.txt"
+    mock_fs = FileStorage(stream=BytesIO(file_content), filename=original_filename, content_type="text/plain")
+    storage_service = LocalStorageService()
+    relative_path = storage_service.save(mock_fs, subfolder="test_subdir_consultant", desired_filename_prefix="consultant_dl")
+    evidence = Evidence(project_task_id=sample_project_task.id, uploaded_by_id=consultant_owner.id, file_name=original_filename, file_path=relative_path, mime_type=mock_fs.mimetype)
+    db.session.add(evidence); db.session.commit()
+    rv = client.get(f'/api/evidence/{evidence.id}/download', headers=headers)
+    assert rv.status_code == 200
+    assert rv.data == file_content

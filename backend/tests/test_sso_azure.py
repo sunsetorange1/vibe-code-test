@@ -31,12 +31,12 @@ def test_sso_azure_callback_new_user(client, mock_azure_ad_graph_api_response, m
         assert user.username == mock_azure_ad_user_info['displayName']
         assert user.password_hash is None
 
-def test_sso_azure_callback_existing_user_link_oid(client, new_user_data, mock_azure_ad_graph_api_response, mock_azure_ad_user_info):
+def test_sso_azure_callback_existing_user_link_oid(client, default_user_data, mock_azure_ad_graph_api_response, mock_azure_ad_user_info):
     local_user = User(
-        username=new_user_data['username'],
-        email=mock_azure_ad_user_info['mail']
+        username=default_user_data['username'],
+        email=mock_azure_ad_user_info['mail'] # Match email to SSO user's email for linking
     )
-    local_user.set_password(new_user_data['password'])
+    local_user.set_password(default_user_data['password'])
     db.session.add(local_user)
     db.session.commit()
     original_user_id = local_user.id

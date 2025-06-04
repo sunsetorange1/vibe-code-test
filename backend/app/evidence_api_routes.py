@@ -1,11 +1,13 @@
 import os # Added import os
-from flask import Blueprint, request, jsonify, current_app, send_from_directory # Added send_from_directory
-from flask_jwt_extended import jwt_required, get_jwt_identity
+import os
+from flask import Blueprint, request, jsonify, current_app, send_from_directory
+from flask_jwt_extended import jwt_required, get_jwt_identity # get_jwt_identity is used
 from werkzeug.utils import secure_filename
 from app import db
-from app.project_models import Project, ProjectTask, Evidence
-from app.models import User
-from app.services.storage_service import LocalStorageService # Import service
+from app.project_models import Project, ProjectTask, Evidence # Project and ProjectTask are used
+from app.models import User, ADMIN, CONSULTANT, READ_ONLY # User and role constants
+from app.auth_decorators import admin_required, consultant_or_admin_required, any_authenticated_user_required # Auth decorators
+from app.services.storage_service import LocalStorageService
 
 evidence_api_bp = Blueprint('evidence_api', __name__, url_prefix='/api')
 
@@ -16,22 +18,28 @@ def is_allowed_file(filename):
     return ext in current_app.config.get('ALLOWED_EXTENSIONS', set())
 
 @evidence_api_bp.route('/tasks/<int:task_id>/evidence', methods=['POST'])
-@jwt_required()
+@consultant_or_admin_required # Consultants or Admins can add evidence
 def add_evidence_to_task(task_id):
     data = request.form.to_dict() # Get metadata from form fields
-    current_user_id = get_jwt_identity()
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
     task = db.session.get(ProjectTask, task_id)
 
     if not task:
         return jsonify({"msg": "Task not found"}), 404
+    if not acting_user: # Should be caught by decorator
+         return jsonify({"msg": "Authenticated user not found"}), 401
 
     project = db.session.get(Project, task.project_id)
     if not project:
-         return jsonify({"msg": "Associated project not found, cannot determine permissions"}), 500
+         return jsonify({"msg": "Associated project not found"}), 500
 
-    if project.owner_id != current_user_id and task.assigned_to_id != current_user_id:
-        return jsonify({"msg": "Unauthorized to add evidence to this task"}), 403
+    if acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Consultant can only add evidence to tasks in their own projects"}), 403
+    # Admin access is implicitly allowed by the decorator.
 
+    # File handling logic starts here
     if 'file' not in request.files:
         return jsonify({"msg": "No file part in the request"}), 400
 
@@ -64,12 +72,13 @@ def add_evidence_to_task(task_id):
 
     new_evidence = Evidence(
         project_task_id=task_id,
-        uploaded_by_id=current_user_id,
+        uploaded_by_id=current_user_jwt_id, # Use the ID of the authenticated user
         file_name=original_safe_filename,
         file_path=relative_file_path,
         storage_identifier=relative_file_path,
         tool_type=data.get('tool_type'),
-        notes=data.get('notes')
+        notes=data.get('notes'),
+        mime_type=file_storage.mimetype
     )
     db.session.add(new_evidence)
     db.session.commit()
@@ -83,82 +92,112 @@ def add_evidence_to_task(task_id):
         "storage_identifier": new_evidence.storage_identifier,
         "tool_type": new_evidence.tool_type,
         "notes": new_evidence.notes,
-        "upload_date": new_evidence.upload_date.isoformat()
+        "upload_date": new_evidence.upload_date.isoformat(),
+        "mime_type": new_evidence.mime_type,
+        "verified": new_evidence.verified
     }
     return jsonify(evidence_data), 201
 
 @evidence_api_bp.route('/tasks/<int:task_id>/evidence', methods=['GET'])
-@jwt_required()
+@any_authenticated_user_required
 def get_task_evidence(task_id):
-    current_user_id = get_jwt_identity()
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
     task = db.session.get(ProjectTask, task_id)
 
     if not task:
         return jsonify({"msg": "Task not found"}), 404
+    if not acting_user: # Should be caught by decorator
+        return jsonify({"msg": "Authenticated user not found"}), 401
 
     project = db.session.get(Project, task.project_id)
     if not project:
          return jsonify({"msg": "Associated project not found"}), 500
 
-    if project.owner_id != current_user_id and task.assigned_to_id != current_user_id:
-        return jsonify({"msg": "Unauthorized to view evidence for this task"}), 403
+    if acting_user.role == ADMIN:
+        pass # Admin can view evidence for any task
+    elif acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Consultant can only view evidence for tasks in their own projects"}), 403
+    elif acting_user.role == READ_ONLY:
+        # TODO: Implement grant-based access for Read-Only users
+        if project.owner_id != acting_user.id:
+             return jsonify({"msg": "Read-Only access to evidence requires specific project grant"}), 403
+    else: # Should not happen
+        return jsonify({"msg": "Unauthorized: Unknown role"}), 403
 
     evidences = Evidence.query.filter_by(project_task_id=task_id).all()
     evidences_data = [{
         "id": e.id, "project_task_id": e.project_task_id, "uploaded_by_id": e.uploaded_by_id,
         "file_name": e.file_name, "file_path": e.file_path, "storage_identifier": e.storage_identifier,
-        "tool_type": e.tool_type, "notes": e.notes, "upload_date": e.upload_date.isoformat()
+        "tool_type": e.tool_type, "notes": e.notes, "upload_date": e.upload_date.isoformat(),
+        "mime_type": e.mime_type, "verified": e.verified
     } for e in evidences]
     return jsonify(evidences_data), 200
 
 @evidence_api_bp.route('/evidence/<int:evidence_id>', methods=['GET'])
-@jwt_required()
+@any_authenticated_user_required
 def get_evidence_detail(evidence_id):
-    current_user_id = get_jwt_identity()
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
     evidence = db.session.get(Evidence, evidence_id)
 
     if not evidence:
         return jsonify({"msg": "Evidence not found"}), 404
+    if not acting_user: # Should be caught by decorator
+        return jsonify({"msg": "Authenticated user not found"}), 401
 
     task = db.session.get(ProjectTask, evidence.project_task_id)
     if not task:
         return jsonify({"msg": "Associated task not found"}), 500
-
     project = db.session.get(Project, task.project_id)
     if not project:
         return jsonify({"msg": "Associated project not found"}), 500
 
-    if (project.owner_id != current_user_id and
-            task.assigned_to_id != current_user_id and
-            evidence.uploaded_by_id != current_user_id):
-        return jsonify({"msg": "Unauthorized to view this evidence"}), 403
+    if acting_user.role == ADMIN:
+        pass # Admin can view any evidence
+    elif acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Consultant can only view this evidence if it belongs to their project"}), 403
+    elif acting_user.role == READ_ONLY:
+        # TODO: Grant-based access
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Read-Only access to this evidence requires specific project grant"}), 403
+    else: # Should not happen
+        return jsonify({"msg": "Unauthorized: Unknown role"}), 403
 
     evidence_data = {
         "id": evidence.id, "project_task_id": evidence.project_task_id, "uploaded_by_id": evidence.uploaded_by_id,
         "file_name": evidence.file_name, "file_path": evidence.file_path, "storage_identifier": evidence.storage_identifier,
-        "tool_type": evidence.tool_type, "notes": evidence.notes, "upload_date": evidence.upload_date.isoformat()
+        "tool_type": evidence.tool_type, "notes": evidence.notes, "upload_date": evidence.upload_date.isoformat(),
+        "mime_type": evidence.mime_type, "verified": evidence.verified
     }
     return jsonify(evidence_data), 200
 
 @evidence_api_bp.route('/evidence/<int:evidence_id>', methods=['DELETE'])
-@jwt_required()
+@consultant_or_admin_required # Only Admin or Consultant (on own project) can delete
 def delete_evidence(evidence_id):
-    current_user_id = get_jwt_identity()
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
     evidence = db.session.get(Evidence, evidence_id)
 
     if not evidence:
         return jsonify({"msg": "Evidence not found"}), 404
+    if not acting_user: # Should be caught by decorator
+        return jsonify({"msg": "Authenticated user not found"}), 401
 
     task = db.session.get(ProjectTask, evidence.project_task_id)
     if not task:
-         return jsonify({"msg": "Associated task not found, cannot determine permissions"}), 500
+         return jsonify({"msg": "Associated task not found"}), 500
 
     project = db.session.get(Project, task.project_id)
     if not project:
-         return jsonify({"msg": "Associated project not found, cannot determine permissions"}), 500
+         return jsonify({"msg": "Associated project not found"}), 500
 
-    if project.owner_id != current_user_id and evidence.uploaded_by_id != current_user_id:
-        return jsonify({"msg": "Unauthorized to delete this evidence"}), 403
+    if acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id: # and evidence.uploaded_by_id != acting_user.id: (Removed uploader check based on prompt focus)
+            return jsonify({"msg": "Consultant can only delete evidence in their own projects"}), 403
+    # Admin can delete any (implicit from decorator)
 
     storage_service = LocalStorageService()
     if evidence.file_path: # Or storage_identifier
@@ -173,16 +212,67 @@ def delete_evidence(evidence_id):
     db.session.commit()
     return jsonify({"msg": "Evidence deleted successfully"}), 200
 
-@evidence_api_bp.route('/evidence/<int:evidence_id>/download', methods=['GET'])
-@jwt_required()
-def download_evidence_file(evidence_id):
-    current_user_id = get_jwt_identity()
+@evidence_api_bp.route('/evidence/<int:evidence_id>', methods=['PUT'])
+@consultant_or_admin_required # Only Admin or Consultant (on own project) can update
+def update_evidence_metadata(evidence_id):
+    data = request.get_json()
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
     evidence = db.session.get(Evidence, evidence_id)
 
     if not evidence:
         return jsonify({"msg": "Evidence not found"}), 404
-    if not evidence.file_path:
+    if not acting_user: # Should be caught by decorator
+        return jsonify({"msg": "Authenticated user not found"}), 401
+
+    task = db.session.get(ProjectTask, evidence.project_task_id)
+    if not task:
+        return jsonify({"msg": "Associated task not found"}), 500
+
+    project = db.session.get(Project, task.project_id)
+    if not project:
+        return jsonify({"msg": "Associated project not found"}), 500
+
+    if acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id: # and evidence.uploaded_by_id != acting_user.id: (Removed uploader check for now)
+            return jsonify({"msg": "Consultant can only update evidence in their own projects"}), 403
+    # Admin can update any (implicit from decorator)
+
+    if 'notes' in data:
+        evidence.notes = data.get('notes')
+    if 'verified' in data:
+        evidence.verified = bool(data.get('verified')) # Ensure boolean
+
+    db.session.commit()
+
+    updated_evidence_data = {
+        "id": evidence.id,
+        "project_task_id": evidence.project_task_id,
+        "uploaded_by_id": evidence.uploaded_by_id,
+        "file_name": evidence.file_name,
+        "file_path": evidence.file_path,
+        "storage_identifier": evidence.storage_identifier,
+        "tool_type": evidence.tool_type,
+        "notes": evidence.notes,
+        "upload_date": evidence.upload_date.isoformat(),
+        "mime_type": evidence.mime_type,
+        "verified": evidence.verified
+    }
+    return jsonify(updated_evidence_data), 200
+
+@evidence_api_bp.route('/evidence/<int:evidence_id>/download', methods=['GET'])
+@any_authenticated_user_required # Similar to get_evidence_detail for view permissions
+def download_evidence_file(evidence_id):
+    current_user_jwt_id = get_jwt_identity()
+    acting_user = User.query.get(current_user_jwt_id)
+    evidence = db.session.get(Evidence, evidence_id)
+
+    if not evidence:
+        return jsonify({"msg": "Evidence not found"}), 404
+    if not evidence.file_path: # Check if there is a file to download
         return jsonify({"msg": "No file associated with this evidence record"}), 404
+    if not acting_user: # Should be caught by decorator
+        return jsonify({"msg": "Authenticated user not found"}), 401
 
     task = db.session.get(ProjectTask, evidence.project_task_id)
     if not task:
@@ -194,10 +284,18 @@ def download_evidence_file(evidence_id):
         current_app.logger.error(f"Consistency issue: Project ID {task.project_id} not found for task ID {task.id}")
         return jsonify({"msg": "Associated project not found"}), 500
 
-    if (project.owner_id != current_user_id and
-            task.assigned_to_id != current_user_id and
-            evidence.uploaded_by_id != current_user_id):
-        return jsonify({"msg": "Unauthorized to download this evidence file"}), 403
+    # Permission check based on role and project ownership (or grant system for RO)
+    if acting_user.role == ADMIN:
+        pass # Admin can download any evidence file
+    elif acting_user.role == CONSULTANT:
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Consultant can only download evidence from their own projects"}), 403
+    elif acting_user.role == READ_ONLY:
+        # TODO: Grant-based access
+        if project.owner_id != acting_user.id:
+            return jsonify({"msg": "Read-Only access to download evidence requires specific project grant"}), 403
+    else: # Should not happen
+        return jsonify({"msg": "Unauthorized: Unknown role"}), 403
 
     storage_service = LocalStorageService()
     upload_dir_abs = current_app.config.get('UPLOAD_FOLDER')
