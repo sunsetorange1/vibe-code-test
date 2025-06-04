@@ -1,7 +1,7 @@
 // frontend/src/pages/TaskDetailPage.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getTask, getTaskEvidence, addEvidence, updateEvidence } from '../services/api';
+import { getTask, getTaskEvidence, addEvidence, updateEvidence, downloadEvidenceFile } from '../services/api'; // Added downloadEvidenceFile
 import { Container, Row, Col, Button, Table, Spinner, Alert, Card, Form, Modal } from 'react-bootstrap';
 
 function TaskDetailPage() {
@@ -12,7 +12,7 @@ function TaskDetailPage() {
   const [evidenceList, setEvidenceList] = useState([]);
   const [loadingTask, setLoadingTask] = useState(true);
   const [loadingEvidence, setLoadingEvidence] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // General page errors
 
   // Add Evidence Form State
   const [showAddEvidenceModal, setShowAddEvidenceModal] = useState(false);
@@ -20,6 +20,7 @@ function TaskDetailPage() {
   const [newEvidenceNotes, setNewEvidenceNotes] = useState('');
   const [newEvidenceToolType, setNewEvidenceToolType] = useState('');
   const [submittingEvidence, setSubmittingEvidence] = useState(false);
+  const [addEvidenceError, setAddEvidenceError] = useState(null); // Error specific to add modal
 
   // Update Evidence Modal State
   const [showUpdateEvidenceModal, setShowUpdateEvidenceModal] = useState(false);
@@ -27,13 +28,19 @@ function TaskDetailPage() {
   const [updateEvidenceNotes, setUpdateEvidenceNotes] = useState('');
   const [updateEvidenceVerified, setUpdateEvidenceVerified] = useState(false);
   const [submittingUpdateEvidence, setSubmittingUpdateEvidence] = useState(false);
+  const [updateEvidenceError, setUpdateEvidenceError] = useState(null); // Error specific to update modal
+
+  // Download Evidence State
+  const [downloadingEvidenceId, setDownloadingEvidenceId] = useState(null);
+  const [downloadError, setDownloadError] = useState(null);
+
 
   const loadTaskDetails = useCallback(async () => {
     try {
       setLoadingTask(true);
+      setError(null); // Clear general page error before new fetch
       const taskData = await getTask(taskId);
       setTask(taskData);
-      setError(null);
     } catch (err) {
       setError(err.message || `Failed to load task details for ID ${taskId}.`);
       setTask(null);
@@ -45,10 +52,12 @@ function TaskDetailPage() {
   const loadEvidence = useCallback(async () => {
     try {
       setLoadingEvidence(true);
+      // setError(null); // Don't clear general error, could be from task load
       const evidenceData = await getTaskEvidence(taskId);
       setEvidenceList(evidenceData);
     } catch (err) {
-      setError(prevError => prevError ? `${prevError}\n${err.message}` : (err.message || `Failed to load evidence for task ID ${taskId}.`));
+      // Append to existing error or set new one if no task error
+      setError(prevError => prevError ? `${prevError}\nEvidence Error: ${err.message}` : (err.message || `Failed to load evidence for task ID ${taskId}.`));
       setEvidenceList([]);
     } finally {
       setLoadingEvidence(false);
@@ -60,13 +69,16 @@ function TaskDetailPage() {
     loadEvidence();
   }, [loadTaskDetails, loadEvidence]);
 
-  const handleAddEvidenceShow = () => setShowAddEvidenceModal(true);
+  const handleAddEvidenceShow = () => {
+    setAddEvidenceError(null); // Clear previous modal error
+    setShowAddEvidenceModal(true);
+  }
   const handleAddEvidenceClose = () => {
     setShowAddEvidenceModal(false);
     setNewEvidenceFile(null);
     setNewEvidenceNotes('');
     setNewEvidenceToolType('');
-    setError(null); // Clear errors from modal
+    setAddEvidenceError(null);
   };
 
   const handleFileChange = (e) => {
@@ -76,11 +88,11 @@ function TaskDetailPage() {
   const handleAddEvidenceSubmit = async (e) => {
     e.preventDefault();
     if (!newEvidenceFile) {
-      setError("A file is required to add evidence.");
+      setAddEvidenceError("A file is required to add evidence.");
       return;
     }
     setSubmittingEvidence(true);
-    setError(null);
+    setAddEvidenceError(null);
     const formData = new FormData();
     formData.append('file', newEvidenceFile);
     formData.append('notes', newEvidenceNotes);
@@ -91,7 +103,7 @@ function TaskDetailPage() {
       handleAddEvidenceClose();
       loadEvidence(); // Refresh evidence list
     } catch (err) {
-      setError(err.message || "Failed to add evidence.");
+      setAddEvidenceError(err.message || "Failed to add evidence.");
     } finally {
       setSubmittingEvidence(false);
     }
@@ -101,21 +113,23 @@ function TaskDetailPage() {
     setCurrentEvidence(evidenceItem);
     setUpdateEvidenceNotes(evidenceItem.notes || '');
     setUpdateEvidenceVerified(evidenceItem.verified || false);
+    setUpdateEvidenceError(null); // Clear previous modal error
     setShowUpdateEvidenceModal(true);
   };
+
   const handleUpdateEvidenceClose = () => {
     setShowUpdateEvidenceModal(false);
     setCurrentEvidence(null);
     setUpdateEvidenceNotes('');
     setUpdateEvidenceVerified(false);
-    setError(null);
+    setUpdateEvidenceError(null);
   };
 
   const handleUpdateEvidenceSubmit = async (e) => {
     e.preventDefault();
     if (!currentEvidence) return;
     setSubmittingUpdateEvidence(true);
-    setError(null);
+    setUpdateEvidenceError(null);
     try {
       await updateEvidence(currentEvidence.id, {
         notes: updateEvidenceNotes,
@@ -124,9 +138,22 @@ function TaskDetailPage() {
       handleUpdateEvidenceClose();
       loadEvidence(); // Refresh list
     } catch (err) {
-      setError(err.message || "Failed to update evidence.");
+      setUpdateEvidenceError(err.message || "Failed to update evidence.");
     } finally {
       setSubmittingUpdateEvidence(false);
+    }
+  };
+
+  const handleDownloadEvidence = async (evidenceId, filename) => {
+    setDownloadingEvidenceId(evidenceId);
+    setDownloadError(null); // Clear previous download errors
+    try {
+      await downloadEvidenceFile(evidenceId, filename);
+    } catch (err) {
+      console.error("Failed to download evidence:", err);
+      setDownloadError(`Failed to download ${filename}: ${err.message}`);
+    } finally {
+      setDownloadingEvidenceId(null);
     }
   };
 
@@ -135,50 +162,75 @@ function TaskDetailPage() {
     return <Container className="mt-3 text-center"><Spinner animation="border" /><p>Loading task...</p></Container>;
   }
 
-  if (error && !task) {
-    return <Container className="mt-3"><Alert variant="danger"><Alert.Heading>Error</Alert.Heading><p>{error}</p></Alert></Container>;
+  if (error && !task && !loadingTask) { // Show critical error if task details failed to load and not still loading
+    return <Container className="mt-3"><Alert variant="danger"><Alert.Heading>Error Loading Task</Alert.Heading><p>{error.split('\n')[0]}</p></Alert></Container>;
   }
 
-  if (!task) {
+  if (!task && !loadingTask) { // If not loading and task is still null (should be caught by error)
     return <Container className="mt-3"><Alert variant="warning">Task not found.</Alert></Container>;
   }
+
+  // Render task details even if evidence has an error initially
+  const taskDisplayError = error && !task ? error.split('\n')[0] : null;
+  const evidenceDisplayError = error && error.includes("Evidence Error:") ? error.split("Evidence Error:")[1] : null;
+
 
   return (
     <Container className="mt-3">
       <Button variant="outline-secondary" size="sm" onClick={() => navigate(`/projects/${projectId}`)} className="mb-3">
         &laquo; Back to Project
       </Button>
-      <Card className="mb-4">
-        <Card.Header as="h1">Task: {task.title}</Card.Header>
-        <Card.Body>
-          <Row>
-            <Col md={8}>
-              <p><strong>Description:</strong> {task.description || 'N/A'}</p>
-            </Col>
-            <Col md={4}>
-              <p><strong>Status:</strong> {task.status}</p>
-              <p><strong>Priority:</strong> {task.priority}</p>
-              <p><strong>Due Date:</strong> {task.due_date || 'N/A'}</p>
-              <p><strong>Reminder Sent:</strong> {task.due_date_reminder_sent ? 'Yes' : 'No'}</p>
-              <p><strong>Assigned To (ID):</strong> {task.assigned_to_id || 'Unassigned'}</p>
-              <p><strong>Created At:</strong> {new Date(task.created_at).toLocaleString()}</p>
-              <p><strong>Updated At:</strong> {new Date(task.updated_at).toLocaleString()}</p>
-            </Col>
-          </Row>
-        </Card.Body>
-      </Card>
+
+      {taskDisplayError && (
+          <Alert variant="danger" onClose={() => setError(null)} dismissible>
+              <Alert.Heading>Error Loading Task Details</Alert.Heading>
+              <p>{taskDisplayError}</p>
+          </Alert>
+      )}
+
+      {task && (
+        <Card className="mb-4">
+          <Card.Header as="h1">Task: {task.title}</Card.Header>
+          <Card.Body>
+            <Row>
+              <Col md={8}>
+                <p><strong>Description:</strong> {task.description || 'N/A'}</p>
+              </Col>
+              <Col md={4}>
+                <p><strong>Status:</strong> {task.status}</p>
+                <p><strong>Priority:</strong> {task.priority}</p>
+                <p><strong>Due Date:</strong> {task.due_date || 'N/A'}</p>
+                <p><strong>Reminder Sent:</strong> {task.due_date_reminder_sent ? 'Yes' : 'No'}</p>
+                <p><strong>Assigned To (ID):</strong> {task.assigned_to_id || 'Unassigned'}</p>
+                <p><strong>Created At:</strong> {new Date(task.created_at).toLocaleString()}</p>
+                <p><strong>Updated At:</strong> {new Date(task.updated_at).toLocaleString()}</p>
+              </Col>
+            </Row>
+          </Card.Body>
+        </Card>
+      )}
 
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>Evidence</h2>
         <Button variant="primary" onClick={handleAddEvidenceShow}>Add Evidence</Button>
       </div>
 
-      {/* General Error Display for page level errors after initial load */}
-      {error && <Alert variant="danger" className="mb-3">{error}</Alert>}
+      {downloadError && (
+        <Alert variant="danger" onClose={() => setDownloadError(null)} dismissible className="mb-3">
+          {downloadError}
+        </Alert>
+      )}
+      {evidenceDisplayError && !loadingEvidence && (
+          <Alert variant="warning" onClose={() => setError(null)} dismissible className="mb-3"> {/* Allow dismissing evidence part of error */}
+              <Alert.Heading>Error Loading Evidence</Alert.Heading>
+              <p>{evidenceDisplayError}</p>
+          </Alert>
+      )}
+
 
       {loadingEvidence && <div className="text-center"><Spinner animation="border" size="sm" /><p>Loading evidence...</p></div>}
 
-      {!loadingEvidence && evidenceList.length === 0 && (
+      {!loadingEvidence && evidenceList.length === 0 && !evidenceDisplayError && (
         <Alert variant="info">No evidence submitted for this task yet.</Alert>
       )}
 
@@ -201,9 +253,15 @@ function TaskDetailPage() {
               <tr key={ev.id}>
                 <td>{ev.id}</td>
                 <td>
-                  <a href={`${API_BASE_URL}/evidence/${ev.id}/download`} target="_blank" rel="noopener noreferrer">
-                    {ev.file_name}
-                  </a>
+                  <Button
+                    variant="link"
+                    onClick={() => handleDownloadEvidence(ev.id, ev.file_name)}
+                    disabled={downloadingEvidenceId === ev.id}
+                    title={`Download ${ev.file_name}`}
+                    style={{ padding: 0, verticalAlign: 'baseline', textDecoration: 'underline' }}
+                  >
+                    {downloadingEvidenceId === ev.id ? 'Downloading...' : ev.file_name}
+                  </Button>
                 </td>
                 <td>{ev.tool_type || 'N/A'}</td>
                 <td>{ev.mime_type || 'N/A'}</td>
@@ -228,7 +286,7 @@ function TaskDetailPage() {
           <Modal.Title>Add New Evidence</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {error && <Alert variant="danger">{error}</Alert>}
+          {addEvidenceError && <Alert variant="danger">{addEvidenceError}</Alert>}
           <Form onSubmit={handleAddEvidenceSubmit}>
             <Form.Group controlId="evidenceFile" className="mb-3">
               <Form.Label>File <span className="text-danger">*</span></Form.Label>
@@ -269,7 +327,7 @@ function TaskDetailPage() {
             <Modal.Title>Update Evidence: {currentEvidence.file_name}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
-            {error && <Alert variant="danger">{error}</Alert>}
+            {updateEvidenceError && <Alert variant="danger">{updateEvidenceError}</Alert>}
             <Form onSubmit={handleUpdateEvidenceSubmit}>
               <Form.Group controlId="updateEvidenceNotes" className="mb-3">
                 <Form.Label>Notes</Form.Label>

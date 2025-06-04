@@ -1,23 +1,44 @@
 // frontend/src/pages/CreateTaskPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Added useEffect
 import { useParams, useNavigate } from 'react-router-dom';
-import { createTask } from '../services/api';
+import { createTask, getUsers } from '../services/api'; // Added getUsers
 import { Form, Button, Container, Alert } from 'react-bootstrap';
 
 function CreateTaskPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+
+  const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     status: 'pending', // Default status
     priority: 'Medium', // Default priority
-    assigned_to_id: '',
+    assigned_to_id: '', // Keep as empty string for "Unassigned" or "Select" option
     due_date: '',
     // due_date_reminder_sent is not set at creation, defaults to false on backend/model
   });
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    async function loadUsers() {
+      setLoadingUsers(true);
+      try {
+        const userData = await getUsers(); // getUsers should be authenticated via api.js
+        setUsers(userData || []); // Ensure userData is not null/undefined before setting
+      } catch (error) {
+        console.error("Failed to fetch users:", error);
+        // Optionally set an error state for users loading, e.g., setError("Failed to load users for assignment.");
+        setUsers([]); // Set to empty array on error
+      } finally {
+        setLoadingUsers(false);
+      }
+    }
+    loadUsers();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -36,21 +57,22 @@ function CreateTaskPage() {
     setSubmitting(true);
     setError(null);
 
-    // Prepare data, convert empty strings for optional fields to null or remove them
     const taskData = { ...formData };
     if (!taskData.description) delete taskData.description;
-    if (!taskData.assigned_to_id) {
-        delete taskData.assigned_to_id; // Send as undefined/null if empty
+
+    // Handle assigned_to_id: if it's an empty string, delete it so backend can set to null or handle as unassigned
+    if (taskData.assigned_to_id === "") {
+        delete taskData.assigned_to_id;
     } else {
-        taskData.assigned_to_id = parseInt(taskData.assigned_to_id, 10);
-        if (isNaN(taskData.assigned_to_id)) {
-             setError("Assigned User ID must be a number.");
+        const parsedId = parseInt(taskData.assigned_to_id, 10);
+        if (isNaN(parsedId)) {
+             setError("Invalid User ID selected for assignee."); // Should not happen with select
              setSubmitting(false);
              return;
         }
+        taskData.assigned_to_id = parsedId;
     }
     if (!taskData.due_date) delete taskData.due_date;
-
 
     try {
       await createTask(projectId, taskData);
@@ -111,14 +133,21 @@ function CreateTaskPage() {
         </Form.Group>
 
         <Form.Group className="mb-3" controlId="taskAssignedToId">
-          <Form.Label>Assigned To (User ID - Optional)</Form.Label>
-          <Form.Control
-            type="number"
+          <Form.Label>Assigned To (Optional)</Form.Label>
+          <Form.Select
             name="assigned_to_id"
             value={formData.assigned_to_id}
             onChange={handleChange}
-            placeholder="Enter User ID"
-          />
+            disabled={loadingUsers}
+          >
+            <option value="">Select Assignee (Optional)</option>
+            {users.map(user => (
+              <option key={user.id} value={user.id}>
+                {user.username} ({user.email})
+              </option>
+            ))}
+          </Form.Select>
+          {loadingUsers && <Form.Text>Loading users...</Form.Text>}
         </Form.Group>
 
         <Form.Group className="mb-3" controlId="taskDueDate">
@@ -131,7 +160,7 @@ function CreateTaskPage() {
           />
         </Form.Group>
 
-        <Button variant="primary" type="submit" disabled={submitting}>
+        <Button variant="primary" type="submit" disabled={submitting || loadingUsers}>
           {submitting ? 'Creating Task...' : 'Create Task'}
         </Button>
       </Form>
