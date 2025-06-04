@@ -30,7 +30,9 @@ def create_project():
         status=data.get('status', 'active'), # Default status
         start_date=parse_date(data.get('start_date')),
         end_date=parse_date(data.get('end_date')),
-        owner_id=current_user_id
+        owner_id=current_user_id,
+        priority=data.get('priority', 'Medium'),
+        project_type=data.get('project_type')
     )
     db.session.add(new_project)
     db.session.commit()
@@ -42,7 +44,9 @@ def create_project():
         "status": new_project.status,
         "start_date": new_project.start_date.isoformat() if new_project.start_date else None,
         "end_date": new_project.end_date.isoformat() if new_project.end_date else None,
-        "owner_id": new_project.owner_id
+        "owner_id": new_project.owner_id,
+        "priority": new_project.priority,
+        "project_type": new_project.project_type
     }
     return jsonify(project_data), 201
 
@@ -61,7 +65,9 @@ def get_projects():
             "status": p.status,
             "start_date": p.start_date.isoformat() if p.start_date else None,
             "end_date": p.end_date.isoformat() if p.end_date else None,
-            "owner_id": p.owner_id
+            "owner_id": p.owner_id,
+            "priority": p.priority,
+            "project_type": p.project_type
         })
     return jsonify(projects_data), 200
 
@@ -85,7 +91,9 @@ def get_project(project_id):
         "status": project.status,
         "start_date": project.start_date.isoformat() if project.start_date else None,
         "end_date": project.end_date.isoformat() if project.end_date else None,
-        "owner_id": project.owner_id
+        "owner_id": project.owner_id,
+        "priority": project.priority,
+        "project_type": project.project_type
     }
     return jsonify(project_data), 200
 
@@ -106,6 +114,11 @@ def update_project(project_id):
     project.description = data.get('description', project.description)
     project.status = data.get('status', project.status)
 
+    if 'priority' in data:
+        project.priority = data.get('priority')
+    if 'project_type' in data:
+        project.project_type = data.get('project_type')
+
     # Allow clearing dates by passing an empty string or explicit null handled by parse_date
     if 'start_date' in data: # Check if key exists to allow setting to None
         project.start_date = parse_date(data.get('start_date'))
@@ -121,7 +134,9 @@ def update_project(project_id):
         "status": project.status,
         "start_date": project.start_date.isoformat() if project.start_date else None,
         "end_date": project.end_date.isoformat() if project.end_date else None,
-        "owner_id": project.owner_id
+        "owner_id": project.owner_id,
+        "priority": project.priority,
+        "project_type": project.project_type
     }
     return jsonify(updated_project_data), 200
 

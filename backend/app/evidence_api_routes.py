@@ -69,7 +69,8 @@ def add_evidence_to_task(task_id):
         file_path=relative_file_path,
         storage_identifier=relative_file_path,
         tool_type=data.get('tool_type'),
-        notes=data.get('notes')
+        notes=data.get('notes'),
+        mime_type=file_storage.mimetype
     )
     db.session.add(new_evidence)
     db.session.commit()
@@ -83,7 +84,9 @@ def add_evidence_to_task(task_id):
         "storage_identifier": new_evidence.storage_identifier,
         "tool_type": new_evidence.tool_type,
         "notes": new_evidence.notes,
-        "upload_date": new_evidence.upload_date.isoformat()
+        "upload_date": new_evidence.upload_date.isoformat(),
+        "mime_type": new_evidence.mime_type,
+        "verified": new_evidence.verified
     }
     return jsonify(evidence_data), 201
 
@@ -107,7 +110,8 @@ def get_task_evidence(task_id):
     evidences_data = [{
         "id": e.id, "project_task_id": e.project_task_id, "uploaded_by_id": e.uploaded_by_id,
         "file_name": e.file_name, "file_path": e.file_path, "storage_identifier": e.storage_identifier,
-        "tool_type": e.tool_type, "notes": e.notes, "upload_date": e.upload_date.isoformat()
+        "tool_type": e.tool_type, "notes": e.notes, "upload_date": e.upload_date.isoformat(),
+        "mime_type": e.mime_type, "verified": e.verified
     } for e in evidences]
     return jsonify(evidences_data), 200
 
@@ -136,7 +140,8 @@ def get_evidence_detail(evidence_id):
     evidence_data = {
         "id": evidence.id, "project_task_id": evidence.project_task_id, "uploaded_by_id": evidence.uploaded_by_id,
         "file_name": evidence.file_name, "file_path": evidence.file_path, "storage_identifier": evidence.storage_identifier,
-        "tool_type": evidence.tool_type, "notes": evidence.notes, "upload_date": evidence.upload_date.isoformat()
+        "tool_type": evidence.tool_type, "notes": evidence.notes, "upload_date": evidence.upload_date.isoformat(),
+        "mime_type": evidence.mime_type, "verified": evidence.verified
     }
     return jsonify(evidence_data), 200
 
@@ -172,6 +177,50 @@ def delete_evidence(evidence_id):
     db.session.delete(evidence)
     db.session.commit()
     return jsonify({"msg": "Evidence deleted successfully"}), 200
+
+@evidence_api_bp.route('/evidence/<int:evidence_id>', methods=['PUT'])
+@jwt_required()
+def update_evidence_metadata(evidence_id):
+    data = request.get_json()
+    current_user_id = get_jwt_identity()
+    evidence = db.session.get(Evidence, evidence_id)
+
+    if not evidence:
+        return jsonify({"msg": "Evidence not found"}), 404
+
+    task = db.session.get(ProjectTask, evidence.project_task_id)
+    if not task: # Should not happen
+        return jsonify({"msg": "Associated task not found"}), 500
+
+    project = db.session.get(Project, task.project_id)
+    if not project: # Should not happen
+        return jsonify({"msg": "Associated project not found"}), 500
+
+    # Authorization: Only project owner or original uploader can update
+    if project.owner_id != current_user_id and evidence.uploaded_by_id != current_user_id:
+        return jsonify({"msg": "Unauthorized to update this evidence"}), 403
+
+    if 'notes' in data:
+        evidence.notes = data.get('notes')
+    if 'verified' in data:
+        evidence.verified = bool(data.get('verified')) # Ensure boolean
+
+    db.session.commit()
+
+    updated_evidence_data = {
+        "id": evidence.id,
+        "project_task_id": evidence.project_task_id,
+        "uploaded_by_id": evidence.uploaded_by_id,
+        "file_name": evidence.file_name,
+        "file_path": evidence.file_path,
+        "storage_identifier": evidence.storage_identifier,
+        "tool_type": evidence.tool_type,
+        "notes": evidence.notes,
+        "upload_date": evidence.upload_date.isoformat(),
+        "mime_type": evidence.mime_type,
+        "verified": evidence.verified
+    }
+    return jsonify(updated_evidence_data), 200
 
 @evidence_api_bp.route('/evidence/<int:evidence_id>/download', methods=['GET'])
 @jwt_required()

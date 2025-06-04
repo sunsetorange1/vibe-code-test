@@ -72,7 +72,9 @@ def create_ad_hoc_task(project_id):
         title=data['title'],
         description=data.get('description'),
         status=data.get('status', 'pending'),
-        due_date=parse_date(data.get('due_date'))
+        due_date=parse_date(data.get('due_date')),
+        priority=data.get('priority', 'Medium'),
+        due_date_reminder_sent=data.get('due_date_reminder_sent', False)
     )
 
     if data.get('assigned_to_id'):
@@ -93,6 +95,8 @@ def create_ad_hoc_task(project_id):
         "assigned_to_id": new_task.assigned_to_id,
         "due_date": new_task.due_date.isoformat() if new_task.due_date else None,
         "task_definition_id": new_task.task_definition_id,
+        "priority": new_task.priority,
+        "due_date_reminder_sent": new_task.due_date_reminder_sent,
         "created_at": new_task.created_at.isoformat(),
         "updated_at": new_task.updated_at.isoformat()
     }
@@ -115,6 +119,8 @@ def get_project_tasks(project_id):
         "project_id": t.project_id, "assigned_to_id": t.assigned_to_id,
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "task_definition_id": t.task_definition_id,
+        "priority": t.priority,
+        "due_date_reminder_sent": t.due_date_reminder_sent,
         "created_at": t.created_at.isoformat(), "updated_at": t.updated_at.isoformat()
     } for t in tasks]
     return jsonify(tasks_data), 200
@@ -137,6 +143,8 @@ def get_task(task_id):
         "project_id": task.project_id, "assigned_to_id": task.assigned_to_id,
         "due_date": task.due_date.isoformat() if task.due_date else None,
         "task_definition_id": task.task_definition_id,
+        "priority": task.priority,
+        "due_date_reminder_sent": task.due_date_reminder_sent,
         "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat()
     }
     return jsonify(task_data), 200
@@ -174,6 +182,10 @@ def update_task(task_id):
                 task.assigned_to_id = None
         if 'due_date' in data:
             task.due_date = parse_date(data.get('due_date'))
+        if 'priority' in data:
+            task.priority = data.get('priority')
+        if 'due_date_reminder_sent' in data: # Ensure this is boolean
+            task.due_date_reminder_sent = bool(data.get('due_date_reminder_sent'))
 
     # Fields updatable by assignee or owner
     if 'description' in data:
@@ -188,6 +200,8 @@ def update_task(task_id):
         "project_id": task.project_id, "assigned_to_id": task.assigned_to_id,
         "due_date": task.due_date.isoformat() if task.due_date else None,
         "task_definition_id": task.task_definition_id,
+        "priority": task.priority,
+        "due_date_reminder_sent": task.due_date_reminder_sent,
         "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat()
     }
     return jsonify(updated_task_data), 200

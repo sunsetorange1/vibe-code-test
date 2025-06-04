@@ -37,7 +37,9 @@ def test_create_ad_hoc_task(client, auth_user_and_headers, sample_project): # Re
         "description": "Details for ad-hoc task Alpha",
         "assigned_to_id": assignee_user.id,
         "status": "in_progress",
-        "due_date": "2024-12-31"
+        "due_date": "2024-12-31",
+        "priority": "High",
+        "due_date_reminder_sent": True
     }
     rv = client.post(f'/api/projects/{sample_project.id}/tasks', json=payload, headers=headers)
     assert rv.status_code == 201, f"Response: {rv.data.decode()}"
@@ -46,10 +48,26 @@ def test_create_ad_hoc_task(client, auth_user_and_headers, sample_project): # Re
     assert data['assigned_to_id'] == assignee_user.id
     assert data['status'] == "in_progress"
     assert data['due_date'] == "2024-12-31"
+    assert data['priority'] == "High"
+    assert data['due_date_reminder_sent'] is True
 
     task = db.session.get(ProjectTask, data['id']) # Use imported db
     assert task is not None
     assert task.project_id == sample_project.id
+    assert task.priority == "High"
+    assert task.due_date_reminder_sent is True
+
+    # Test creation with defaults for new fields
+    payload_defaults = {
+        "title": "Ad-hoc Task Defaults",
+        "description": "Testing default priority and reminder_sent"
+    }
+    rv_defaults = client.post(f'/api/projects/{sample_project.id}/tasks', json=payload_defaults, headers=headers)
+    assert rv_defaults.status_code == 201, f"Response: {rv_defaults.data.decode()}"
+    data_defaults = rv_defaults.get_json()
+    assert data_defaults['title'] == payload_defaults['title']
+    assert data_defaults['priority'] == 'Medium' # Default value
+    assert data_defaults['due_date_reminder_sent'] is False # Default value
 
 def test_get_project_tasks(client, auth_user_and_headers, sample_project_task, sample_project): # Added sample_project for context
     owner, headers = auth_user_and_headers
@@ -63,7 +81,12 @@ def test_get_project_tasks(client, auth_user_and_headers, sample_project_task, s
     data = rv.get_json()
     assert isinstance(data, list)
     assert len(data) >= 1 # sample_project_task should be there
-    assert any(t['id'] == sample_project_task.id for t in data)
+    found_task = next((t for t in data if t['id'] == sample_project_task.id), None)
+    assert found_task is not None
+    assert 'priority' in found_task
+    assert 'due_date_reminder_sent' in found_task
+    assert found_task['priority'] == sample_project_task.priority # Default 'Medium'
+    assert found_task['due_date_reminder_sent'] == sample_project_task.due_date_reminder_sent # Default False
 
 
 def test_get_specific_task_by_owner(client, auth_user_and_headers, sample_project_task):
@@ -78,6 +101,8 @@ def test_get_specific_task_by_owner(client, auth_user_and_headers, sample_projec
     assert rv.status_code == 200, f"Response: {rv.data.decode()}"
     data = rv.get_json()
     assert data['title'] == sample_project_task.title
+    assert data['priority'] == sample_project_task.priority
+    assert data['due_date_reminder_sent'] == sample_project_task.due_date_reminder_sent
 
 def test_get_specific_task_by_assignee(client, auth_user_and_headers, sample_project_task):
     assignee, headers = auth_user_and_headers
@@ -98,6 +123,8 @@ def test_get_specific_task_by_assignee(client, auth_user_and_headers, sample_pro
     assert rv.status_code == 200, f"Response: {rv.data.decode()}"
     data = rv.get_json()
     assert data['title'] == sample_project_task.title
+    assert data['priority'] == sample_project_task.priority
+    assert data['due_date_reminder_sent'] == sample_project_task.due_date_reminder_sent
 
 def test_update_task_status_by_assignee(client, auth_user_and_headers, sample_project_task):
     assignee, headers = auth_user_and_headers
@@ -119,9 +146,16 @@ def test_update_task_status_by_assignee(client, auth_user_and_headers, sample_pr
     data = rv.get_json()
     assert data['status'] == "in_review"
     assert data['description'] == "Assignee updated description for review"
+    # Assert that assignee cannot change priority or reminder_sent
+    assert data['priority'] == sample_project_task.priority # Should remain unchanged
+    assert data['due_date_reminder_sent'] == sample_project_task.due_date_reminder_sent # Should remain unchanged
+
 
     updated_task = db.session.get(ProjectTask, sample_project_task.id) # Use imported db
     assert updated_task.status == "in_review"
+    assert updated_task.priority == sample_project_task.priority # Confirm in DB
+    assert updated_task.due_date_reminder_sent == sample_project_task.due_date_reminder_sent # Confirm in DB
+
 
 def test_update_task_fully_by_owner(client, auth_user_and_headers, sample_project_task):
     owner, headers = auth_user_and_headers
@@ -145,7 +179,9 @@ def test_update_task_fully_by_owner(client, auth_user_and_headers, sample_projec
         "status": "completed",
         "description": "Owner's final description.",
         "assigned_to_id": new_assignee.id,
-        "due_date": "2025-01-01"
+        "due_date": "2025-01-01",
+        "priority": "Critical",
+        "due_date_reminder_sent": True
     }
     rv = client.put(f'/api/tasks/{sample_project_task.id}', json=payload, headers=headers)
     assert rv.status_code == 200, f"Response: {rv.data.decode()}"
@@ -154,6 +190,10 @@ def test_update_task_fully_by_owner(client, auth_user_and_headers, sample_projec
     assert data['status'] == payload['status']
     assert data['assigned_to_id'] == new_assignee.id
     assert data['due_date'] == "2025-01-01"
+    assert data['priority'] == "Critical"
+    assert data['due_date_reminder_sent'] is True
 
     updated_task = db.session.get(ProjectTask, sample_project_task.id) # Use imported db
     assert updated_task.title == payload['title']
+    assert updated_task.priority == "Critical"
+    assert updated_task.due_date_reminder_sent is True

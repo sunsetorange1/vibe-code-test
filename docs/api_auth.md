@@ -1,128 +1,79 @@
-# API Authentication and User Endpoints
+# API Documentation - Authentication
 
-This document outlines the authentication endpoints and related user profile API.
+This document outlines the API endpoints related to user authentication and authorization.
 
-## Authentication Endpoints
+## Authentication Routes
 
-All authentication endpoints are prefixed with `/auth`.
+### Register New User
 
-### 1. User Registration
-
-*   **Endpoint:** `POST /auth/register`
-*   **Description:** Registers a new user.
-*   **Request Body (JSON):**
+*   **POST** `/auth/register`
+*   **Description:** Creates a new user account.
+*   **Authentication:** None required.
+*   **Request Body:**
     ```json
     {
-        "username": "yourusername",
-        "email": "user@example.com",
-        "password": "yourpassword"
+        "username": "string (required)",
+        "email": "string (required)",
+        "password": "string (required)"
     }
     ```
-*   **Success Response (201 Created):**
-    ```json
-    {
-        "msg": "User created successfully",
-        "user": {
-            "id": 1,
-            "username": "yourusername",
-            "email": "user@example.com"
+*   **Success Response:**
+    *   **Code:** `201 Created`
+    *   **Content:**
+        ```json
+        {
+            "msg": "User created successfully",
+            "user": {
+                "id": "integer",
+                "username": "string",
+                "email": "string"
+            }
         }
-    }
-    ```
+        ```
 *   **Error Responses:**
-    *   `400 Bad Request`: Missing JSON, or missing `username`, `email`, or `password`.
-        ```json
-        {"msg": "Missing JSON in request"}
-        ```
-        ```json
-        {"msg": "Missing username, email, or password"}
-        ```
-    *   `400 Bad Request`: Username or email already exists.
-        ```json
-        {"msg": "Username already exists"}
-        ```
-        ```json
-        {"msg": "Email already exists"}
-        ```
+    *   `400 Bad Request`: Missing username, email, or password. Username or email already exists. Missing JSON in request.
+    *   `415 Unsupported Media Type`: Request body is not JSON.
 
-### 2. User Login
+### Login User
 
-*   **Endpoint:** `POST /auth/login`
-*   **Description:** Authenticates an existing user and returns a JWT.
-*   **Request Body (JSON):**
+*   **POST** `/auth/login`
+*   **Description:** Authenticates an existing user and returns a JWT access token.
+*   **Authentication:** None required.
+*   **Request Body:**
     ```json
     {
-        "username": "yourusername",
-        "password": "yourpassword"
+        "username": "string (required)",
+        "password": "string (required)"
     }
     ```
-*   **Success Response (200 OK):**
-    ```json
-    {
-        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." // JWT string
-    }
-    ```
+*   **Success Response:**
+    *   **Code:** `200 OK`
+    *   **Content:**
+        ```json
+        {
+            "access_token": "string (JWT)"
+        }
+        ```
 *   **Error Responses:**
-    *   `400 Bad Request`: Missing JSON, or missing `username` or `password`.
+    *   `400 Bad Request`: Missing username or password. Missing JSON in request.
     *   `401 Unauthorized`: Bad username or password.
+    *   `415 Unsupported Media Type`: Request body is not JSON.
+
+### Azure AD SSO Callback
+
+*   **GET** `/auth/sso/azure/callback`
+*   **Description:** Handles the callback from Azure AD after single sign-on (SSO) authentication. If successful, it finds an existing user by Azure Object ID (OID) or email, or creates a new user if one doesn't exist. It then issues a JWT access token for the application.
+*   **Authentication:** None directly (relies on Azure AD session and the redirect from Azure).
+*   **Request Body:** None.
+*   **Query Parameters:** Azure AD will append query parameters like `code`, `state`, `session_state` as part of the OAuth 2.0 authorization code flow. These are handled by the `flask-dance` library.
+*   **Success Response:**
+    *   **Code:** `200 OK`
+    *   **Content:**
         ```json
-        {"msg": "Bad username or password"}
+        {
+            "access_token": "string (JWT)"
+        }
         ```
-
-## User Profile API
-
-Endpoints related to user profiles are prefixed with `/api`. These endpoints require authentication (a valid JWT Bearer token in the `Authorization` header).
-
-### 1. Get Current User Profile
-
-*   **Endpoint:** `GET /api/me`
-*   **Description:** Retrieves the profile information of the currently authenticated user.
-*   **Headers:**
-    *   `Authorization: Bearer <your_access_token>`
-*   **Success Response (200 OK):**
-    ```json
-    {
-        "id": 1,
-        "username": "yourusername",
-        "email": "user@example.com"
-    }
-    ```
 *   **Error Responses:**
-    *   `401 Unauthorized`: Missing or invalid JWT.
-    *   `404 Not Found`: User associated with JWT not found (should be rare if token is valid).
-
-## Microsoft Azure AD SSO
-
-These endpoints facilitate user authentication via Microsoft Azure Active Directory.
-
-### 1. Initiate SSO Login
-
-*   **Endpoint:** `GET /auth/sso/azure/login`
-*   **Description:** Initiates the Microsoft Azure AD authentication flow. The user's browser will be redirected to the Microsoft login page. This URL is automatically provided by the Flask-Dance Azure blueprint.
-*   **Request Parameters:** None.
-*   **Response:** A redirect (302) to Microsoft's authentication service.
-
-### 2. SSO Callback
-
-*   **Endpoint:** `GET /auth/sso/azure/callback`
-*   **Description:** This is the callback URL that Azure AD redirects to after the user authenticates with Microsoft. The application backend handles the token exchange with Azure AD, fetches user information, creates or links the user account in the local database, and then issues a local application JWT.
-    *This endpoint is primarily handled by the browser redirecting from Microsoft and is not typically called directly by a client API consumer after the initial setup.*
-*   **Success Response (200 OK, after successful internal processing and JWT issuance):**
-    ```json
-    {
-        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." // Local application JWT string
-    }
-    ```
-    *(Note: In a full web application, this endpoint might redirect the user to a frontend page, possibly embedding the token in the URL or a secure cookie, rather than returning JSON directly. The current implementation returns JSON for consistency with the local login endpoint).*
-*   **Error Responses:**
-    *   `401 Unauthorized`: If Azure AD authorization failed or was denied by the user.
-        ```json
-        {"msg": "Azure AD authorization failed. Please try again."}
-        ```
-    *   `500 Internal Server Error`: If there was an issue fetching user information from Microsoft, creating/linking the user, or other server-side errors during processing.
-        ```json
-        {"msg": "Could not retrieve essential user info from Microsoft. Please try again."}
-        ```
-        ```json
-        {"msg": "An error occurred during SSO processing: <specific_error_details>"}
-        ```
+    *   `401 Unauthorized`: Azure AD authorization failed or was denied by the user.
+    *   `500 Internal Server Error`: Could not retrieve essential user information from Microsoft Graph API (e.g., OID or email missing). Error creating a user profile due to username conflict or other database issues. Other unexpected errors during SSO processing.
