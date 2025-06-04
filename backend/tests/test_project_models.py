@@ -23,6 +23,12 @@ def test_create_project_model(db_session, project_owner_user):
     assert retrieved_project.owner.username == project_owner_user.username
     assert retrieved_project.status == "planning"
     assert retrieved_project.start_date == date(2024,1,1)
+    assert retrieved_project.priority == 'Medium' # Test default priority
+
+    retrieved_project.project_type = "Internal Audit"
+    db_session.session.commit()
+    updated_project = db_session.session.get(Project, project.id)
+    assert updated_project.project_type == "Internal Audit"
 
 def test_project_task_relationship(db_session, sample_project, sample_task_definition, project_owner_user):
     # sample_project and sample_task_definition are created using db_session via their fixtures
@@ -99,6 +105,8 @@ def test_project_task_defaults_and_timestamps(db_session, sample_project):
     # For now, just checking it's not None and is a datetime
     assert task.updated_at is not None
     assert task.updated_at >= first_updated_at
+    assert task.priority == 'Medium' # Test default priority
+    assert task.due_date_reminder_sent is False # Test default reminder_sent
 
 
 def test_evidence_defaults(db_session, sample_project_task, project_owner_user):
@@ -112,3 +120,9 @@ def test_evidence_defaults(db_session, sample_project_task, project_owner_user):
     assert evidence.id is not None
     assert evidence.upload_date is not None
     assert isinstance(evidence.upload_date, datetime)
+    assert evidence.verified is False # Test default verified
+
+    evidence.mime_type = "application/pdf"
+    db_session.session.commit()
+    updated_evidence = db_session.session.get(Evidence, evidence.id)
+    assert updated_evidence.mime_type == "application/pdf"
