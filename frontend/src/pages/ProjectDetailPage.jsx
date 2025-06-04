@@ -1,50 +1,62 @@
 // frontend/src/pages/ProjectDetailPage.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getProject, getProjectTasks } from '../services/api';
 import { Container, Row, Col, Button, Table, Spinner, Alert, Card } from 'react-bootstrap';
+import { useAuth } from '../contexts/AuthContext';
+import { ADMIN, CONSULTANT } from '../constants/roles';
 
 function ProjectDetailPage() {
   const { projectId } = useParams();
+  const { user } = useAuth(); // Get current user from AuthContext
+
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loadingProject, setLoadingProject] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [error, setError] = useState(null);
 
+  const loadProjectDetails = useCallback(async () => {
+    try {
+      setLoadingProject(true);
+      const projectData = await getProject(projectId);
+      setProject(projectData);
+      setError(null);
+    } catch (err) {
+      setError(err.message || `Failed to load project details for ID ${projectId}.`);
+      setProject(null);
+    } finally {
+      setLoadingProject(false);
+    }
+  }, [projectId]);
+
+  const loadTasks = useCallback(async () => {
+    try {
+      setLoadingTasks(true);
+      const tasksData = await getProjectTasks(projectId);
+      setTasks(tasksData);
+    } catch (err) {
+      setError(prevError => prevError ? `${prevError}\n${err.message}` : (err.message || `Failed to load tasks for project ID ${projectId}.`));
+      setTasks([]);
+    } finally {
+      setLoadingTasks(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
-    async function loadProjectDetails() {
-      try {
-        setLoadingProject(true);
-        const projectData = await getProject(projectId);
-        setProject(projectData);
-        setError(null); // Clear previous errors
-      } catch (err) {
-        setError(err.message || `Failed to load project details for ID ${projectId}.`);
-        setProject(null);
-      } finally {
-        setLoadingProject(false);
-      }
-    }
-
-    async function loadTasks() {
-      try {
-        setLoadingTasks(true);
-        const tasksData = await getProjectTasks(projectId);
-        setTasks(tasksData);
-        // If project error occurred, this might clear it if tasks load successfully.
-        // setError(null);
-      } catch (err) {
-        setError(prevError => prevError ? `${prevError}\n${err.message}` : (err.message || `Failed to load tasks for project ID ${projectId}.`));
-        setTasks([]);
-      } finally {
-        setLoadingTasks(false);
-      }
-    }
-
     loadProjectDetails();
     loadTasks();
-  }, [projectId]);
+  }, [loadProjectDetails, loadTasks]);
+
+  // Determine if the "Create New Task" button should be visible
+  let canCreateTask = false;
+  if (user && project) { // Ensure user and project data are loaded
+    if (user.role === ADMIN) {
+      canCreateTask = true;
+    } else if (user.role === CONSULTANT && project.owner_id === user.id) {
+      canCreateTask = true;
+    }
+  }
 
   if (loadingProject) {
     return (
@@ -57,20 +69,23 @@ function ProjectDetailPage() {
     );
   }
 
-  if (error && !project) { // Show critical error if project details failed to load
+  if (error && !project) {
     return (
       <Container className="mt-3">
         <Alert variant="danger">
           <Alert.Heading>Error Loading Project</Alert.Heading>
-          <p>{error}</p>
+          <p>{error.split('\n')[0]}</p> {/* Show only the primary error if project failed */}
         </Alert>
       </Container>
     );
   }
 
-  if (!project) { // Should be caught by error state, but as a fallback
+  if (!project) {
       return <Container className="mt-3"><Alert variant="warning">Project not found.</Alert></Container>;
   }
+
+  const pageError = error && error.includes("tasks for project ID") ? error.split('\n').find(e => e.includes("tasks for project ID")) : null;
+
 
   return (
     <Container className="mt-3">
@@ -89,15 +104,17 @@ function ProjectDetailPage() {
               <Card.Text><strong>End Date:</strong> {project.end_date || 'N/A'}</Card.Text>
             </Col>
           </Row>
-          {/* Future: Add Edit Project button here */}
+          {/* Future: Add Edit Project button here, wrapped in ShowForRole or similar logic */}
         </Card.Body>
       </Card>
 
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>Tasks</h2>
-        <Button as={Link} to={`/projects/${projectId}/tasks/create`} variant="success">
-          Create New Task
-        </Button>
+        {canCreateTask && (
+          <Button as={Link} to={`/projects/${projectId}/tasks/create`} variant="success">
+            Create New Task
+          </Button>
+        )}
       </div>
       {loadingTasks && (
         <div className="text-center">
@@ -107,13 +124,13 @@ function ProjectDetailPage() {
           <p>Loading tasks...</p>
         </div>
       )}
-      {error && tasks.length === 0 && ( // Display error related to tasks if tasks couldn't be loaded
-          <Alert variant="danger">
+      {pageError && (
+          <Alert variant="danger" onClose={() => setError(null)} dismissible>
               <Alert.Heading>Error Loading Tasks</Alert.Heading>
-              <p>{error.includes("tasks") ? error : "An error occurred while loading tasks."}</p>
+              <p>{pageError}</p>
           </Alert>
       )}
-      {!loadingTasks && tasks.length === 0 && (!error || !error.includes("tasks")) && (
+      {!loadingTasks && tasks.length === 0 && !pageError && (
         <Alert variant="info">No tasks found for this project. Why not create one?</Alert>
       )}
       {!loadingTasks && tasks.length > 0 && (
@@ -127,7 +144,6 @@ function ProjectDetailPage() {
               <th>Priority</th>
               <th>Reminder Sent</th>
               <th>Assigned To (ID)</th>
-              {/* Add more headers if needed, e.g., for actions */}
             </tr>
           </thead>
           <tbody>

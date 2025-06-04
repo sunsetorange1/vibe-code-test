@@ -7,177 +7,103 @@ This document outlines the API endpoints related to evidence management for proj
 ### Add Evidence to Task
 
 *   **POST** `/api/tasks/{task_id}/evidence`
-*   **Description:** Uploads a file as evidence for a specific task. The request must be `multipart/form-data`. The user must be the project owner or assigned to the task. `mime_type` is automatically detected from the uploaded file. `verified` defaults to `false`.
+*   **Description:** Uploads a file as evidence for a specific task. `mime_type` is automatically detected. `verified` defaults to `false`.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can add evidence to any task in any project.
+    *   `Consultant`: Can only add evidence to tasks in projects they own.
 *   **Path Parameters:**
     *   `task_id` (integer, required): The ID of the task to which this evidence will be added.
-*   **Request Body (multipart/form-data):**
-    *   `file` (file, required): The evidence file to upload.
-    *   `tool_type` (string, optional): The type of tool or method used to generate the evidence (e.g., "nessus_scan", "screenshot").
-    *   `notes` (string, optional): Any notes or description for the evidence.
-*   **Success Response:**
-    *   **Code:** `201 Created`
-    *   **Content:** The created evidence object.
-        ```json
-        {
-            "id": "integer",
-            "project_task_id": "integer",
-            "uploaded_by_id": "integer",
-            "file_name": "string (original name of the uploaded file)",
-            "file_path": "string (path where the file is stored internally)",
-            "storage_identifier": "string (identifier for storage, often same as file_path)",
-            "tool_type": "string or null",
-            "notes": "string or null",
-            "upload_date": "string (ISO 8601 datetime)",
-            "mime_type": "string (e.g., 'application/pdf', 'image/png')",
-            "verified": "boolean (defaults to false)"
-        }
-        ```
+*   **Request Body (multipart/form-data):** (As before)
+*   **Success Response:** (As before, includes `mime_type`, `verified`)
 *   **Error Responses:**
-    *   `400 Bad Request`: No file part in request, no file selected, file type not allowed.
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to add evidence to this task.
-    *   `404 Not Found`: Task with the given ID not found.
-    *   `500 Internal Server Error`: Could not save file. Associated project not found.
+    *   `400 Bad Request`: No file part, no file selected, file type not allowed.
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found in DB.
+    *   `403 Forbidden`: User's role not permitted or Consultant does not own the project.
+    *   `404 Not Found`: Task not found.
+    *   `500 Internal Server Error`: File save error, or associated project not found.
 
 ### Get All Evidence for a Task
 
 *   **GET** `/api/tasks/{task_id}/evidence`
-*   **Description:** Retrieves all evidence records associated with a specific task. The user must be the project owner or assigned to the task.
+*   **Description:** Retrieves all evidence records for a specific task. Access depends on role and project ownership/grants.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `task_id` (integer, required): The ID of the task for which to retrieve evidence.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** An array of evidence objects.
-        ```json
-        [
-            {
-                "id": "integer",
-                "project_task_id": "integer",
-                "uploaded_by_id": "integer",
-                "file_name": "string",
-                "file_path": "string",
-                "storage_identifier": "string",
-                "tool_type": "string or null",
-                "notes": "string or null",
-                "upload_date": "string (ISO 8601 datetime)",
-                "mime_type": "string",
-                "verified": "boolean"
-            }
-            // ... more evidence records
-        ]
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only`.
+    *   `Administrator`: Can view evidence for any task.
+    *   `Consultant`: Can only view evidence for tasks in projects they own.
+    *   `Read-Only`: Access currently restricted if not project owner (pending grant system). Will receive 403 if not owner/admin for the project.
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before, array of evidence objects with `mime_type`, `verified`)
 *   **Error Responses:**
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to view evidence for this task.
-    *   `404 Not Found`: Task with the given ID not found.
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found.
+    *   `403 Forbidden`: User's role and ownership/grants do not permit access.
+    *   `404 Not Found`: Task not found.
     *   `500 Internal Server Error`: Associated project not found.
 
 ### Get Evidence Detail by ID
 
 *   **GET** `/api/evidence/{evidence_id}`
-*   **Description:** Retrieves a specific evidence record by its ID. The user must be the project owner, assigned to the parent task, or the user who uploaded the evidence.
+*   **Description:** Retrieves a specific evidence record. Access depends on role and project ownership/grants of the parent task's project.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `evidence_id` (integer, required): The ID of the evidence to retrieve.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** The evidence object.
-        ```json
-        {
-            "id": "integer",
-            "project_task_id": "integer",
-            "uploaded_by_id": "integer",
-            "file_name": "string",
-            "file_path": "string",
-            "storage_identifier": "string",
-            "tool_type": "string or null",
-            "notes": "string or null",
-            "upload_date": "string (ISO 8601 datetime)",
-            "mime_type": "string",
-            "verified": "boolean"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only`.
+    *   `Administrator`: Can view any evidence.
+    *   `Consultant`: Can only view evidence in projects they own.
+    *   `Read-Only`: Access currently restricted (pending grant system). Will receive 403 if not owner/admin for the project.
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before, evidence object with `mime_type`, `verified`)
 *   **Error Responses:**
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to view this evidence.
-    *   `404 Not Found`: Evidence with the given ID not found.
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found.
+    *   `403 Forbidden`: User's role and ownership/grants do not permit access.
+    *   `404 Not Found`: Evidence not found.
     *   `500 Internal Server Error`: Associated task or project not found.
 
 ### Update Evidence Metadata
 
 *   **PUT** `/api/evidence/{evidence_id}`
-*   **Description:** Updates metadata for a specific evidence item, such as notes or verification status. File content itself cannot be changed with this endpoint.
+*   **Description:** Updates metadata (notes, verification status) for an evidence item.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `evidence_id` (integer, required): The ID of the evidence to update.
-*   **Request Body:**
-    ```json
-    {
-        "notes": "string (optional, new notes for the evidence)",
-        "verified": "boolean (optional, new verification status)"
-    }
-    ```
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** The updated evidence object.
-        ```json
-        {
-            "id": "integer",
-            "project_task_id": "integer",
-            "uploaded_by_id": "integer",
-            "file_name": "string",
-            "file_path": "string",
-            "storage_identifier": "string",
-            "tool_type": "string or null",
-            "notes": "string or null (updated)",
-            "upload_date": "string (ISO 8601 datetime)",
-            "mime_type": "string",
-            "verified": "boolean (updated)"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can update any evidence.
+    *   `Consultant`: Can only update evidence in projects they own.
+*   **Path Parameters:** (As before)
+*   **Request Body:** (As before - `notes`, `verified`)
+*   **Success Response:** (As before, updated evidence object with `mime_type`, `verified`)
 *   **Error Responses:**
-    *   `400 Bad Request`: Invalid boolean value for verified.
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to update this evidence (not project owner or original uploader).
-    *   `404 Not Found`: Evidence with the given ID not found.
+    *   `400 Bad Request`: Invalid boolean for `verified`.
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found.
+    *   `403 Forbidden`: User's role not permitted or Consultant does not own the project.
+    *   `404 Not Found`: Evidence not found.
     *   `500 Internal Server Error`: Associated task or project not found.
-*   **Permissions:** Only the project owner or the user who originally uploaded the evidence can update it.
 
 ### Delete Evidence
 
 *   **DELETE** `/api/evidence/{evidence_id}`
-*   **Description:** Deletes a specific evidence record and its associated file from storage. The user must be the project owner or the user who uploaded the evidence.
+*   **Description:** Deletes an evidence record and its associated file.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `evidence_id` (integer, required): The ID of the evidence to delete.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:**
-        ```json
-        {
-            "msg": "Evidence deleted successfully"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can delete any evidence.
+    *   `Consultant`: Can only delete evidence in projects they own.
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before)
 *   **Error Responses:**
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to delete this evidence.
-    *   `404 Not Found`: Evidence with the given ID not found.
-    *   `500 Internal Server Error`: Associated task or project not found. Failure to delete file from storage (metadata might still be deleted).
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found.
+    *   `403 Forbidden`: User's role not permitted or Consultant does not own the project.
+    *   `404 Not Found`: Evidence not found.
+    *   `500 Internal Server Error`: Associated task/project not found, or file deletion error.
 
 ### Download Evidence File
 
 *   **GET** `/api/evidence/{evidence_id}/download`
-*   **Description:** Downloads the file associated with a specific evidence record. The user must be the project owner, assigned to the parent task, or the user who uploaded the evidence.
+*   **Description:** Downloads the file associated with an evidence record. Access depends on role and project ownership/grants.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `evidence_id` (integer, required): The ID of the evidence whose file is to be downloaded.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** The file as an attachment.
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only`.
+    *   `Administrator`: Can download any evidence file.
+    *   `Consultant`: Can only download evidence from projects they own.
+    *   `Read-Only`: Access currently restricted (pending grant system). Will receive 403 if not owner/admin for the project.
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before - file attachment)
 *   **Error Responses:**
-    *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to download this evidence file.
-    *   `404 Not Found`: Evidence record not found, no file associated with the record, or file not found on server.
-    *   `500 Internal Server Error`: Associated task or project not found. File download service not configured. Error sending file.
+    *   `401 Unauthorized`: JWT missing/invalid, or authenticated user not found.
+    *   `403 Forbidden`: User's role and ownership/grants do not permit access.
+    *   `404 Not Found`: Evidence/file not found on server.
+    *   `500 Internal Server Error`: Associated task/project not found, or download service configuration error.

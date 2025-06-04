@@ -1,21 +1,30 @@
 import json
-from app.models import User
+from app.models import User, READ_ONLY # Import READ_ONLY
 
-def test_register_user(client, new_user_data):
+def test_register_user(client, default_user_data):
     # Test successful registration
-    rv = client.post('/auth/register', json=new_user_data)
+    rv = client.post('/auth/register', json=default_user_data)
     assert rv.status_code == 201
     json_data = rv.get_json()
     assert json_data['msg'] == "User created successfully"
-    assert json_data['user']['username'] == new_user_data['username']
+    assert json_data['user']['username'] == default_user_data['username']
+
+    # Verify default role
+    registered_user_data = json_data.get('user')
+    assert registered_user_data is not None and 'id' in registered_user_data
+    user_id = registered_user_data['id']
+    user_from_db = User.query.get(user_id)
+    assert user_from_db is not None
+    assert user_from_db.role == READ_ONLY
+
 
     # Test duplicate username
-    rv = client.post('/auth/register', json=new_user_data)
+    rv = client.post('/auth/register', json=default_user_data)
     assert rv.status_code == 400
     assert rv.get_json()['msg'] == "Username already exists"
 
     # Test duplicate email
-    duplicate_email_data = new_user_data.copy()
+    duplicate_email_data = default_user_data.copy()
     duplicate_email_data['username'] = "anotheruser" # Change username for this check
     rv = client.post('/auth/register', json=duplicate_email_data)
     assert rv.status_code == 400
@@ -27,19 +36,19 @@ def test_register_user(client, new_user_data):
     assert rv.status_code == 400
     assert "Missing username, email, or password" in rv.get_json()['msg'] # Adjusted to match actual error msg
 
-def test_login_user(client, new_user_data):
+def test_login_user(client, default_user_data):
     # First, register a user
-    client.post('/auth/register', json=new_user_data)
+    client.post('/auth/register', json=default_user_data)
 
     # Test successful login
-    login_data = {"username": new_user_data['username'], "password": new_user_data['password']}
+    login_data = {"username": default_user_data['username'], "password": default_user_data['password']}
     rv = client.post('/auth/login', json=login_data)
     assert rv.status_code == 200
     json_data = rv.get_json()
     assert "access_token" in json_data
 
     # Test wrong password
-    login_data_wrong_pass = {"username": new_user_data['username'], "password": "wrongpassword"}
+    login_data_wrong_pass = {"username": default_user_data['username'], "password": "wrongpassword"}
     rv = client.post('/auth/login', json=login_data_wrong_pass)
     assert rv.status_code == 401
     assert rv.get_json()['msg'] == "Bad username or password"
@@ -50,18 +59,18 @@ def test_login_user(client, new_user_data):
     assert rv.status_code == 401
     assert rv.get_json()['msg'] == "Bad username or password"
 
-def test_get_me_protected(client, new_user_data):
+def test_get_me_protected(client, default_user_data):
     # Register and login to get token
-    client.post('/auth/register', json=new_user_data)
-    login_rv = client.post('/auth/login', json={"username": new_user_data['username'], "password": new_user_data['password']})
+    client.post('/auth/register', json=default_user_data)
+    login_rv = client.post('/auth/login', json={"username": default_user_data['username'], "password": default_user_data['password']})
     access_token = login_rv.get_json()['access_token']
 
     # Test access with token
     rv = client.get('/api/me', headers={"Authorization": f"Bearer {access_token}"})
     assert rv.status_code == 200
     json_data = rv.get_json()
-    assert json_data['username'] == new_user_data['username']
-    assert json_data['email'] == new_user_data['email']
+    assert json_data['username'] == default_user_data['username']
+    assert json_data['email'] == default_user_data['email']
 
     # Test access without token
     rv = client.get('/api/me')

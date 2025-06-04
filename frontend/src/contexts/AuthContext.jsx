@@ -9,7 +9,16 @@ const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    const storedUser = localStorage.getItem('user');
+    try {
+      return storedUser ? JSON.parse(storedUser) : null;
+    } catch (error) {
+      console.error("Failed to parse stored user from localStorage:", error);
+      localStorage.removeItem('user'); // Clear corrupted item
+      return null;
+    }
+  });
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token')); // Initial state based on token
   const [isLoading, setIsLoading] = useState(true); // To manage initial loading state

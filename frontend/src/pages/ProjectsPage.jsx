@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { getProjects } from '../services/api';
 import { Container, Table, Button, Spinner, Alert } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { ShowForRole } from '../components'; // Adjusted path assuming components/index.js is used
+import { ADMIN, CONSULTANT } from '../constants/roles';
 
 function ProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -53,9 +55,11 @@ function ProjectsPage() {
     <Container className="mt-3">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h1>Projects</h1>
-        <Button as={Link} to="/projects/create" variant="primary">
-          Create New Project
-        </Button>
+        <ShowForRole roles={[ADMIN, CONSULTANT]}>
+          <Button as={Link} to="/projects/create" variant="primary">
+            Create New Project
+          </Button>
+        </ShowForRole>
       </div>
       {projects.length === 0 && !loading && !error && (
         <Alert variant="info">No projects found. Why not create one?</Alert>

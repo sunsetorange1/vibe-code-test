@@ -7,8 +7,9 @@ This document outlines the API endpoints related to project management.
 ### Create Project
 
 *   **POST** `/api/projects`
-*   **Description:** Creates a new project.
+*   **Description:** Creates a new project. The project's `owner_id` will be set to the ID of the authenticated user making the request.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`.
 *   **Request Body:**
     ```json
     {
@@ -40,12 +41,17 @@ This document outlines the API endpoints related to project management.
 *   **Error Responses:**
     *   `400 Bad Request`: Missing project name. Invalid date format (must be YYYY-MM-DD).
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
+    *   `403 Forbidden`: User's role is not authorized (e.g., `Read-Only` user attempting to create).
 
-### Get All Projects for Current User
+### Get All Projects
 
 *   **GET** `/api/projects`
-*   **Description:** Retrieves all projects owned by the currently authenticated user.
+*   **Description:** Retrieves a list of projects based on the user's role.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only`.
+    *   `Administrator`: Can view all projects.
+    *   `Consultant`: Can view only projects they own.
+    *   `Read-Only`: Currently views no projects via this general list (pending grant system implementation).
 *   **Request Body:** None.
 *   **Success Response:**
     *   **Code:** `200 OK`
@@ -68,12 +74,17 @@ This document outlines the API endpoints related to project management.
         ```
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
+    *   `404 Not Found`: If the authenticated user is not found in the database.
 
 ### Get Project by ID
 
 *   **GET** `/api/projects/{project_id}`
-*   **Description:** Retrieves a specific project by its ID. The user must be the owner of the project.
+*   **Description:** Retrieves a specific project by its ID. Access depends on user role and project ownership (or future grants).
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only`.
+    *   `Administrator`: Can view any project.
+    *   `Consultant`: Can only view projects they own.
+    *   `Read-Only`: Currently denied access to specific projects via this endpoint unless they own it (which is unlikely for a strict RO role) or a future grant system allows it. Will receive a 403 if not owner/admin.
 *   **Path Parameters:**
     *   `project_id` (integer, required): The ID of the project to retrieve.
 *   **Success Response:**
@@ -94,14 +105,17 @@ This document outlines the API endpoints related to project management.
         ```
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to access this project (not the owner).
-    *   `404 Not Found`: Project with the given ID not found.
+    *   `403 Forbidden`: User's role and ownership/grants do not permit access.
+    *   `404 Not Found`: Project with the given ID not found, or authenticated user not found in DB.
 
 ### Update Project
 
 *   **PUT** `/api/projects/{project_id}`
-*   **Description:** Updates an existing project. The user must be the owner of the project. Fields not provided in the request body will retain their current values.
+*   **Description:** Updates an existing project.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can update any project.
+    *   `Consultant`: Can only update projects they own.
 *   **Path Parameters:**
     *   `project_id` (integer, required): The ID of the project to update.
 *   **Request Body:**
@@ -135,14 +149,15 @@ This document outlines the API endpoints related to project management.
 *   **Error Responses:**
     *   `400 Bad Request`: Invalid date format (must be YYYY-MM-DD).
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to update this project (not the owner).
+    *   `403 Forbidden`: User's role not permitted, or Consultant attempting to update a project they don't own.
     *   `404 Not Found`: Project with the given ID not found.
 
 ### Delete Project
 
 *   **DELETE** `/api/projects/{project_id}`
-*   **Description:** Deletes a specific project by its ID. The user must be the owner of the project.
+*   **Description:** Deletes a specific project by its ID.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator` only.
 *   **Path Parameters:**
     *   `project_id` (integer, required): The ID of the project to delete.
 *   **Success Response:**
@@ -155,5 +170,5 @@ This document outlines the API endpoints related to project management.
         ```
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to delete this project (not the owner).
+    *   `403 Forbidden`: User's role is not `Administrator`.
     *   `404 Not Found`: Project with the given ID not found.

@@ -1,12 +1,15 @@
 // frontend/src/pages/TaskDetailPage.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getTask, getTaskEvidence, addEvidence, updateEvidence, downloadEvidenceFile } from '../services/api'; // Added downloadEvidenceFile
+import { getTask, getTaskEvidence, addEvidence, updateEvidence, downloadEvidenceFile } from '../services/api';
 import { Container, Row, Col, Button, Table, Spinner, Alert, Card, Form, Modal } from 'react-bootstrap';
+import { useAuth } from '../contexts/AuthContext'; // Import useAuth
+import { ADMIN, CONSULTANT } from '../constants/roles'; // Import role constants
 
 function TaskDetailPage() {
-  const { projectId, taskId } = useParams(); // projectId for back navigation or context
+  const { projectId, taskId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth(); // Get current user
 
   const [task, setTask] = useState(null);
   const [evidenceList, setEvidenceList] = useState([]);
@@ -174,6 +177,21 @@ function TaskDetailPage() {
   const taskDisplayError = error && !task ? error.split('\n')[0] : null;
   const evidenceDisplayError = error && error.includes("Evidence Error:") ? error.split("Evidence Error:")[1] : null;
 
+  // Determine if "Add Evidence" button and "Edit" buttons for evidence items should be visible
+  let canManageEvidenceItems = false; // For Add, Edit, Delete evidence items
+  if (user && task) {
+    if (user.role === ADMIN) {
+      canManageEvidenceItems = true;
+    } else if (user.role === CONSULTANT) {
+      // Backend already restricts task visibility for Consultants to their own projects.
+      // So, if a Consultant is viewing this page, they have the necessary project ownership.
+      canManageEvidenceItems = true;
+    }
+    // READ_ONLY users will have canManageEvidenceItems = false by default
+  }
+  // For clarity, canAddEvidence can be the same as canManageEvidenceItems for this page's context
+  const canAddEvidence = canManageEvidenceItems;
+
 
   return (
     <Container className="mt-3">
@@ -212,7 +230,9 @@ function TaskDetailPage() {
 
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>Evidence</h2>
-        <Button variant="primary" onClick={handleAddEvidenceShow}>Add Evidence</Button>
+        {canAddEvidence && (
+          <Button variant="primary" onClick={handleAddEvidenceShow}>Add Evidence</Button>
+        )}
       </div>
 
       {downloadError && (
@@ -269,10 +289,12 @@ function TaskDetailPage() {
                 <td>{new Date(ev.upload_date).toLocaleString()}</td>
                 <td>{ev.verified ? 'Yes' : 'No'}</td>
                 <td>
-                  <Button variant="outline-primary" size="sm" onClick={() => handleUpdateEvidenceShow(ev)}>
-                    Edit
-                  </Button>
-                  {/* Future: Delete button */}
+                  {canManageEvidenceItems && (
+                    <Button variant="outline-primary" size="sm" onClick={() => handleUpdateEvidenceShow(ev)}>
+                      Edit
+                    </Button>
+                  )}
+                  {/* Future: Delete button would also use canManageEvidenceItems */}
                 </td>
               </tr>
             ))}

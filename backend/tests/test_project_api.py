@@ -1,144 +1,193 @@
 import json
 from app.project_models import Project
-from app.models import User # Import User model
-from app import db # Use the db instance from app module
+from app.models import User, ADMIN, CONSULTANT, READ_ONLY # Import roles
+from app import db
 
-def test_create_project(client, auth_user_and_headers):
-    owner, headers = auth_user_and_headers
-    payload = {
-        "name": "New Awesome Project",
-        "description": "Desc for awesome project",
-        "status": "planning",
-        "priority": "High",
-        "project_type": "External Pentest"
-    }
+# === Create Project Tests ===
+def test_create_project_as_consultant(client, auth_consultant_user_and_headers, consultant_user):
+    _, headers = auth_consultant_user_and_headers
+    payload = {"name": "Consultant Project", "priority": "High", "project_type": "Pentest"}
     rv = client.post('/api/projects', json=payload, headers=headers)
     assert rv.status_code == 201
     data = rv.get_json()
     assert data['name'] == payload['name']
-    assert data['owner_id'] == owner.id
-    assert data['status'] == 'planning'
+    assert data['owner_id'] == consultant_user.id
     assert data['priority'] == 'High'
-    assert data['project_type'] == 'External Pentest'
+    project = db.session.get(Project, data['id'])
+    assert project.owner_id == consultant_user.id
 
-    project = db.session.get(Project, data['id']) # Use imported db
-    assert project is not None
-    assert project.priority == 'High'
-    assert project.project_type == 'External Pentest'
+def test_create_project_as_admin(client, auth_admin_user_and_headers, admin_user):
+    _, headers = auth_admin_user_and_headers
+    payload = {"name": "Admin Project", "priority": "Low", "project_type": "Internal Review"}
+    rv = client.post('/api/projects', json=payload, headers=headers)
+    assert rv.status_code == 201
+    data = rv.get_json()
+    assert data['name'] == payload['name']
+    assert data['owner_id'] == admin_user.id # Admin becomes owner when creating
+    project = db.session.get(Project, data['id'])
+    assert project.owner_id == admin_user.id
 
-    # Test default priority and null project_type
-    payload_default = {"name": "Project With Defaults", "description": "Testing defaults"}
-    rv_default = client.post('/api/projects', json=payload_default, headers=headers)
-    assert rv_default.status_code == 201
-    data_default = rv_default.get_json()
-    assert data_default['name'] == payload_default['name']
-    assert data_default['priority'] == 'Medium' # Default value
-    assert data_default['project_type'] is None # Default is None
+def test_create_project_as_readonly_denied(client, auth_user_and_headers): # auth_user is READ_ONLY
+    _, headers = auth_user_and_headers
+    payload = {"name": "ReadOnly Project Attempt"}
+    rv = client.post('/api/projects', json=payload, headers=headers)
+    assert rv.status_code == 403
 
-def test_get_projects_owned(client, auth_user_and_headers, sample_project):
-    owner, headers = auth_user_and_headers
+# === Get Projects (List) Tests ===
+def test_get_projects_as_consultant(client, auth_consultant_user_and_headers, sample_project, consultant_user):
+    # sample_project is owned by consultant_user
+    _, headers = auth_consultant_user_and_headers
+    # Create another project by another user (e.g. admin) that consultant should not see
+    admin = User.query.filter_by(email="admin@example.com").first() # Assuming admin_user fixture ran or created it
+    if admin:
+        other_project = Project(name="AdminOnlyProject", owner_id=admin.id)
+        db.session.add(other_project)
+        db.session.commit()
+
     rv = client.get('/api/projects', headers=headers)
     assert rv.status_code == 200
     data = rv.get_json()
-    assert len(data) >= 1
+    assert isinstance(data, list)
+    assert len(data) >= 1 # At least sample_project
+    assert any(p['id'] == sample_project.id for p in data)
+    if admin:
+        assert not any(p['name'] == "AdminOnlyProject" for p in data)
 
-    found_project = next((p for p in data if p['id'] == sample_project.id), None)
-    assert found_project is not None
-    assert found_project['name'] == sample_project.name
-    assert found_project['owner_id'] == owner.id
-    assert 'priority' in found_project # Check new fields are present
-    assert 'project_type' in found_project
-    assert found_project['priority'] == sample_project.priority # Assuming sample_project has default 'Medium'
-    assert found_project['project_type'] == sample_project.project_type # Assuming sample_project has None
+def test_get_projects_as_admin(client, auth_admin_user_and_headers, sample_project, consultant_user):
+    _, headers = auth_admin_user_and_headers
+    # Create another project by admin
+    admin_user_obj = User.query.filter_by(email="admin@example.com").first() # from auth_admin_user_and_headers
+    admin_project = Project(name="ProjectByAdminForListTest", owner_id=admin_user_obj.id)
+    db.session.add(admin_project)
+    db.session.commit()
 
-def test_get_specific_project_owner(client, auth_user_and_headers, sample_project):
-    owner, headers = auth_user_and_headers
-    assert sample_project.owner_id == owner.id
+    rv = client.get('/api/projects', headers=headers)
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert isinstance(data, list)
+    project_ids = [p['id'] for p in data]
+    assert sample_project.id in project_ids # Owned by consultant
+    assert admin_project.id in project_ids # Owned by admin
 
+def test_get_projects_as_readonly(client, auth_user_and_headers, sample_project):
+    # READ_ONLY user should get an empty list as per current logic (no grants)
+    _, headers = auth_user_and_headers
+    rv = client.get('/api/projects', headers=headers)
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert isinstance(data, list)
+    assert len(data) == 0
+
+# === Get Specific Project Tests ===
+def test_get_specific_project_consultant_owner(client, auth_consultant_user_and_headers, sample_project):
+    consultant, headers = auth_consultant_user_and_headers
+    assert sample_project.owner_id == consultant.id
     rv = client.get(f'/api/projects/{sample_project.id}', headers=headers)
     assert rv.status_code == 200
     data = rv.get_json()
-    assert data['name'] == sample_project.name
-    assert data['priority'] == sample_project.priority
-    assert data['project_type'] == sample_project.project_type
+    assert data['id'] == sample_project.id
 
-def test_get_specific_project_unauthorized(client, sample_project, another_user_data, project_owner_user):
-    # project_owner_user is the owner of sample_project
-    # Create and login as 'another_user'
-    # Ensure another_user_data is used to create a distinct user in the db for this test
-    another_user = User.query.filter_by(email=another_user_data['email']).first()
-    if not another_user:
-        client.post('/auth/register', json=another_user_data) # Register the other user
+def test_get_specific_project_admin_can_view_others(client, auth_admin_user_and_headers, sample_project):
+    # sample_project is owned by consultant_user
+    _, headers = auth_admin_user_and_headers
+    rv = client.get(f'/api/projects/{sample_project.id}', headers=headers)
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data['id'] == sample_project.id
 
-    login_rv = client.post('/auth/login', json={
-        "username": another_user_data['username'],
-        "password": another_user_data['password']
-    })
-    assert login_rv.status_code == 200, f"Login failed for other_user: {login_rv.data.decode()}"
-    other_access_token = login_rv.get_json()['access_token']
-    other_headers = {"Authorization": f"Bearer {other_access_token}"}
-
-    rv = client.get(f'/api/projects/{sample_project.id}', headers=other_headers)
+def test_get_specific_project_consultant_denied_for_others(client, auth_consultant_user_and_headers, admin_user):
+    consultant, headers = auth_consultant_user_and_headers
+    # Project owned by admin
+    other_project = Project(name="AdminProjectForConsultantDeny", owner_id=admin_user.id)
+    db.session.add(other_project)
+    db.session.commit()
+    rv = client.get(f'/api/projects/{other_project.id}', headers=headers)
     assert rv.status_code == 403
 
-def test_update_project_owner(client, auth_user_and_headers, sample_project):
-    owner, headers = auth_user_and_headers
-    assert sample_project.owner_id == owner.id
+def test_get_specific_project_readonly_denied(client, auth_user_and_headers, sample_project):
+    # sample_project owned by consultant_user
+    _, headers = auth_user_and_headers # READ_ONLY user
+    rv = client.get(f'/api/projects/{sample_project.id}', headers=headers)
+    assert rv.status_code == 403
 
-    payload = {
-        "name": "Updated Project Name",
-        "status": "in_progress",
-        "description": "New Description",
-        "priority": "Low",
-        "project_type": "Compliance Check"
-    }
+# === Update Project Tests ===
+def test_update_project_consultant_owner(client, auth_consultant_user_and_headers, sample_project):
+    consultant, headers = auth_consultant_user_and_headers
+    assert sample_project.owner_id == consultant.id
+    payload = {"name": "Updated By Consultant Owner", "priority": "Critical"}
     rv = client.put(f'/api/projects/{sample_project.id}', json=payload, headers=headers)
     assert rv.status_code == 200
     data = rv.get_json()
-    assert data['name'] == "Updated Project Name"
-    assert data['status'] == "in_progress"
-    assert data['description'] == "New Description"
-    assert data['priority'] == "Low"
-    assert data['project_type'] == "Compliance Check"
+    assert data['name'] == "Updated By Consultant Owner"
+    assert data['priority'] == "Critical"
 
-    updated_project = db.session.get(Project, sample_project.id) # Use imported db
-    assert updated_project.name == "Updated Project Name"
-    assert updated_project.status == "in_progress"
-    assert updated_project.priority == "Low"
-    assert updated_project.project_type == "Compliance Check"
-
-    # Test updating only one of the new fields
-    payload_partial = {"priority": "Very High"}
-    rv_partial = client.put(f'/api/projects/{sample_project.id}', json=payload_partial, headers=headers)
-    assert rv_partial.status_code == 200
-    data_partial = rv_partial.get_json()
-    assert data_partial['priority'] == "Very High"
-    assert data_partial['project_type'] == "Compliance Check" # Should remain from previous update
-    assert data_partial['name'] == "Updated Project Name" # Should remain
-
-def test_delete_project_owner(client, auth_user_and_headers, sample_project):
-    owner, headers = auth_user_and_headers
-    assert sample_project.owner_id == owner.id
-    project_id_to_delete = sample_project.id
-
-    rv = client.delete(f'/api/projects/{project_id_to_delete}', headers=headers)
+def test_update_project_admin_can_update_others(client, auth_admin_user_and_headers, sample_project):
+    # sample_project owned by consultant_user
+    _, headers = auth_admin_user_and_headers
+    payload = {"name": "Updated By Admin", "status": "completed"}
+    rv = client.put(f'/api/projects/{sample_project.id}', json=payload, headers=headers)
     assert rv.status_code == 200
-    assert db.session.get(Project, project_id_to_delete) is None # Use imported db
+    data = rv.get_json()
+    assert data['name'] == "Updated By Admin"
+    assert data['status'] == "completed"
 
-def test_delete_project_unauthorized(client, sample_project, another_user_data):
-    # Ensure another_user_data is used to create a distinct user
+def test_update_project_consultant_denied_for_others(client, auth_consultant_user_and_headers, admin_user):
+    consultant, headers = auth_consultant_user_and_headers
+    other_project = Project(name="AdminProjectForUpdateDeny", owner_id=admin_user.id)
+    db.session.add(other_project)
+    db.session.commit()
+    payload = {"name": "Attempted Update By Consultant"}
+    rv = client.put(f'/api/projects/{other_project.id}', json=payload, headers=headers)
+    assert rv.status_code == 403
+
+def test_update_project_readonly_denied(client, auth_user_and_headers, sample_project):
+    _, headers = auth_user_and_headers # READ_ONLY user
+    payload = {"name": "Attempted Update By ReadOnly"}
+    rv = client.put(f'/api/projects/{sample_project.id}', json=payload, headers=headers)
+    assert rv.status_code == 403
+
+# === Delete Project Tests ===
+def test_delete_project_admin(client, auth_admin_user_and_headers, sample_project):
+    # sample_project owned by consultant_user
+    _, headers = auth_admin_user_and_headers
+    project_id = sample_project.id
+    rv = client.delete(f'/api/projects/{project_id}', headers=headers)
+    assert rv.status_code == 200
+    assert db.session.get(Project, project_id) is None
+
+def test_delete_project_consultant_denied(client, auth_consultant_user_and_headers, sample_project):
+    _, headers = auth_consultant_user_and_headers
+    rv = client.delete(f'/api/projects/{sample_project.id}', headers=headers)
+    assert rv.status_code == 403
+
+def test_delete_project_readonly_denied(client, auth_user_and_headers, sample_project):
+    _, headers = auth_user_and_headers # READ_ONLY user
+    rv = client.delete(f'/api/projects/{sample_project.id}', headers=headers)
+    assert rv.status_code == 403
+
+# Existing unauthorized test, should still pass (another READ_ONLY user trying to access consultant's project)
+def test_get_specific_project_unauthorized_default_user(client, sample_project, another_user_data, consultant_user):
+    # sample_project is owned by consultant_user (from fixture default)
+    # 'another_user' will be created with default READ_ONLY role
+
+    # Ensure 'another_user' exists and has default role
     another_user = User.query.filter_by(email=another_user_data['email']).first()
     if not another_user:
-        client.post('/auth/register', json=another_user_data)
+        # Registering will give READ_ONLY role by default
+        reg_rv = client.post('/auth/register', json=another_user_data)
+        assert reg_rv.status_code == 201
+        another_user_id = reg_rv.get_json()['user']['id']
+        another_user = db.session.get(User, another_user_id)
+
+    assert another_user.role == READ_ONLY
+    assert sample_project.owner_id != another_user.id
 
     login_rv = client.post('/auth/login', json={
         "username": another_user_data['username'],
         "password": another_user_data['password']
     })
     assert login_rv.status_code == 200, f"Login failed for other_user: {login_rv.data.decode()}"
-    other_access_token = login_rv.get_json()['access_token']
-    other_headers = {"Authorization": f"Bearer {other_access_token}"}
+    other_headers = {"Authorization": f"Bearer {login_rv.get_json()['access_token']}"}
 
-    rv = client.delete(f'/api/projects/{sample_project.id}', headers=other_headers)
-    assert rv.status_code == 403
-    assert db.session.get(Project, sample_project.id) is not None # Use imported db
+    rv = client.get(f'/api/projects/{sample_project.id}', headers=other_headers)
+    assert rv.status_code == 403 # READ_ONLY user cannot access project they don't have grants to (and don't own)

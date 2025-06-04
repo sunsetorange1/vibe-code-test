@@ -7,8 +7,9 @@ This document outlines API endpoints related to user management.
 ### List All Users
 
 *   **GET** `/api/users`
-*   **Description:** Retrieves a list of all registered users. This endpoint is typically restricted to administrative users in a production environment, but here it's available to any authenticated user.
+*   **Description:** Retrieves a list of all registered users. This endpoint is intended for Administrators and Consultants (e.g., for task assignment).
 *   **Authentication:** JWT Bearer token required in Authorization header.
+*   **Required Roles:** `Administrator`, `Consultant`.
 *   **Request Body:** None.
 *   **Path Parameters:** None.
 *   **Query Parameters:** None.
@@ -27,4 +28,5 @@ This document outlines API endpoints related to user management.
         ```
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
+    *   `403 Forbidden`: User's role is not `Administrator` or `Consultant`.
     *   `500 Internal Server Error`: An unexpected error occurred on the server while trying to retrieve users. (Includes `error` field with details if available).
