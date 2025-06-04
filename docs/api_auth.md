@@ -7,7 +7,7 @@ This document outlines the API endpoints related to user authentication and auth
 ### Register New User
 
 *   **POST** `/auth/register`
-*   **Description:** Creates a new user account.
+*   **Description:** Creates a new user account. New users are assigned the `Read-Only` role by default.
 *   **Authentication:** None required.
 *   **Request Body:**
     ```json
@@ -19,7 +19,7 @@ This document outlines the API endpoints related to user authentication and auth
     ```
 *   **Success Response:**
     *   **Code:** `201 Created`
-    *   **Content:**
+    *   **Content:** (User object in response does not include role by default, role is set on backend).
         ```json
         {
             "msg": "User created successfully",
@@ -37,7 +37,7 @@ This document outlines the API endpoints related to user authentication and auth
 ### Login User
 
 *   **POST** `/auth/login`
-*   **Description:** Authenticates an existing user and returns a JWT access token.
+*   **Description:** Authenticates an existing user and returns a JWT access token. The token includes user identity (ID) which can be used with `/api/me` to get full user details including role.
 *   **Authentication:** None required.
 *   **Request Body:**
     ```json
@@ -62,7 +62,7 @@ This document outlines the API endpoints related to user authentication and auth
 ### Azure AD SSO Callback
 
 *   **GET** `/auth/sso/azure/callback`
-*   **Description:** Handles the callback from Azure AD after single sign-on (SSO) authentication. If successful, it finds an existing user by Azure Object ID (OID) or email, or creates a new user if one doesn't exist. It then issues a JWT access token for the application.
+*   **Description:** Handles the callback from Azure AD after single sign-on (SSO) authentication. If successful, it finds an existing user by Azure Object ID (OID) or email, or creates a new user if one doesn't exist. New users created via SSO are assigned the `Read-Only` role by default. It then issues a JWT access token for the application.
 *   **Authentication:** None directly (relies on Azure AD session and the redirect from Azure).
 *   **Request Body:** None.
 *   **Query Parameters:** Azure AD will append query parameters like `code`, `state`, `session_state` as part of the OAuth 2.0 authorization code flow. These are handled by the `flask-dance` library.

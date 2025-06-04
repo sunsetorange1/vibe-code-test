@@ -7,8 +7,9 @@ This document outlines the API endpoints related to baseline management.
 ### Create Baseline
 
 *   **POST** `/api/baselines`
-*   **Description:** Creates a new baseline.
+*   **Description:** Creates a new baseline. The `created_by_id` will be set to the ID of the authenticated user.
 *   **Authentication:** JWT Bearer token required.
+*   **Required Roles:** `Administrator`, `Consultant`.
 *   **Request Body:**
     ```json
     {
@@ -18,38 +19,19 @@ This document outlines the API endpoints related to baseline management.
     ```
 *   **Success Response:**
     *   **Code:** `201 Created`
-    *   **Content:**
-        ```json
-        {
-            "id": "integer",
-            "name": "string",
-            "description": "string",
-            "created_by_id": "integer"
-        }
-        ```
+    *   **Content:** (As before)
 *   **Error Responses:**
     *   `400 Bad Request`: Missing baseline name. Baseline with the same name already exists.
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
+    *   `403 Forbidden`: User's role is not authorized.
 
 ### Get All Baselines
 
 *   **GET** `/api/baselines`
 *   **Description:** Retrieves all available baselines.
 *   **Authentication:** JWT Bearer token required.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** An array of baseline objects.
-        ```json
-        [
-            {
-                "id": "integer",
-                "name": "string",
-                "description": "string",
-                "created_by_id": "integer"
-            }
-            // ... more baselines
-        ]
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only` (Any authenticated user).
+*   **Success Response:** (As before)
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
 
@@ -58,28 +40,9 @@ This document outlines the API endpoints related to baseline management.
 *   **GET** `/api/baselines/{baseline_id}`
 *   **Description:** Retrieves a specific baseline by its ID, including its associated task definitions.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `baseline_id` (integer, required): The ID of the baseline to retrieve.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:**
-        ```json
-        {
-            "id": "integer",
-            "name": "string",
-            "description": "string",
-            "created_by_id": "integer",
-            "task_definitions": [
-                {
-                    "id": "integer",
-                    "title": "string",
-                    "description": "string",
-                    "category": "string"
-                }
-                // ... more task definitions
-            ]
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`, `Read-Only` (Any authenticated user).
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before)
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
     *   `404 Not Found`: Baseline with the given ID not found.
@@ -89,84 +52,47 @@ This document outlines the API endpoints related to baseline management.
 ### Create Task Definition for Baseline
 
 *   **POST** `/api/baselines/{baseline_id}/task_definitions`
-*   **Description:** Creates a new task definition and associates it with a specific baseline. The authenticated user must be the creator of the baseline.
+*   **Description:** Creates a new task definition and associates it with a specific baseline.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `baseline_id` (integer, required): The ID of the baseline to which this task definition will be added.
-*   **Request Body:**
-    ```json
-    {
-        "title": "string (required)",
-        "description": "string (optional)",
-        "category": "string (optional)"
-    }
-    ```
-*   **Success Response:**
-    *   **Code:** `201 Created`
-    *   **Content:**
-        ```json
-        {
-            "id": "integer",
-            "title": "string",
-            "description": "string",
-            "category": "string",
-            "baseline_id": "integer"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can add task definitions to any baseline.
+    *   `Consultant`: Can only add task definitions to baselines they created.
+*   **Path Parameters:** (As before)
+*   **Request Body:** (As before)
+*   **Success Response:** (As before)
 *   **Error Responses:**
     *   `400 Bad Request`: Missing task definition title.
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to add tasks to this baseline (not the creator).
+    *   `403 Forbidden`: User's role not permitted or Consultant is not the creator of the baseline.
     *   `404 Not Found`: Baseline with the given ID not found.
 
 ### Update Task Definition
 
 *   **PUT** `/api/task_definitions/{task_def_id}`
-*   **Description:** Updates an existing task definition. The authenticated user must be the creator of the parent baseline.
+*   **Description:** Updates an existing task definition.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `task_def_id` (integer, required): The ID of the task definition to update.
-*   **Request Body:**
-    ```json
-    {
-        "title": "string (optional)",
-        "description": "string (optional)",
-        "category": "string (optional)"
-    }
-    ```
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:** The updated task definition object.
-        ```json
-        {
-            "id": "integer",
-            "title": "string",
-            "description": "string",
-            "category": "string",
-            "baseline_id": "integer"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can update any task definition.
+    *   `Consultant`: Can only update task definitions belonging to baselines they created.
+*   **Path Parameters:** (As before)
+*   **Request Body:** (As before)
+*   **Success Response:** (As before)
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to update this task definition (not the creator of the parent baseline).
+    *   `403 Forbidden`: User's role not permitted or Consultant is not the creator of the parent baseline.
     *   `404 Not Found`: Task definition with the given ID not found.
 
 ### Delete Task Definition
 
 *   **DELETE** `/api/task_definitions/{task_def_id}`
-*   **Description:** Deletes a specific task definition. The authenticated user must be the creator of the parent baseline.
+*   **Description:** Deletes a specific task definition.
 *   **Authentication:** JWT Bearer token required.
-*   **Path Parameters:**
-    *   `task_def_id` (integer, required): The ID of the task definition to delete.
-*   **Success Response:**
-    *   **Code:** `200 OK`
-    *   **Content:**
-        ```json
-        {
-            "msg": "Task definition deleted successfully"
-        }
-        ```
+*   **Required Roles:** `Administrator`, `Consultant`.
+    *   `Administrator`: Can delete any task definition.
+    *   `Consultant`: Can only delete task definitions belonging to baselines they created.
+*   **Path Parameters:** (As before)
+*   **Success Response:** (As before)
 *   **Error Responses:**
     *   `401 Unauthorized`: JWT is missing, invalid, or expired.
-    *   `403 Forbidden`: User is not authorized to delete this task definition (not the creator of the parent baseline).
+    *   `403 Forbidden`: User's role not permitted or Consultant is not the creator of the parent baseline.
     *   `404 Not Found`: Task definition with the given ID not found.
