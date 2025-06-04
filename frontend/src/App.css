@@ -1,7 +1,49 @@
-#root {
-  /* max-width: 1280px; /* Removed for now, can be added back if specific width is needed */
-  /* margin: 0 auto; /* Removed for now, can be added back */
-  /* padding: 2rem; /* Removed, was for Vite demo page */
+/* Ensure html and body allow full height for vertical centering */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-/* Removed Vite default logo, card, and animation styles */
+/* If #root is a flex container from App.jsx, this might not be needed */
+/* #root {
+  display: flex;
+  flex-direction: column;
+} */
+
+.login-card {
+  width: 90%;
+  max-width: 450px; /* Adjusted max-width slightly */
+  border: none; /* Optional: remove card border if shadow is enough */
+}
+
+/* Ensure Card.Body padding is consistent if overriding */
+.login-card .card-body {
+  padding: 2rem; /* Example: Use Bootstrap spacing 'p-4' or 'p-5' or explicit value */
+}
+
+/* Styling for the login button, d-grid on parent handles width */
+.login-button {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  font-size: 1.1rem; /* Slightly larger button text */
+}
+
+/* Responsive adjustments for smaller screens if needed beyond Bootstrap utilities */
+@media (max-width: 576px) {
+  .login-card {
+    margin-top: 20px; /* Add some margin at the top on small screens */
+    margin-bottom: 20px;
+  }
+  /* The d-grid class on the button's parent div should make it full-width.
+     If more specific control is needed:
+  .login-card .btn-primary {
+    width: 100%;
+  }
+  */
+}
+
+/* Ensure the main app container in App.jsx doesn't constrain LoginPage if it's not full-width */
+/* If App.jsx has a <Container> that's not fluid, it could affect LoginPage.
+   The LoginPage itself uses a fluid Container, so it should be fine,
+   but this is a note for overall app structure. */
